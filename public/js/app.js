@@ -40,14 +40,16 @@ function buildCard(p) {
   const confClass = rec.confidence === 'Élevée' ? 'confidence-high' : rec.confidence === 'Moyenne' ? 'confidence-medium' : 'confidence-low';
   const time = new Date(p.fixture.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   const webBadges = [
+    p.webSources?.fpred || p.webSources?.footballpred ? '<span class="web-badge">FPred</span>' : '',
     p.webSources?.besoccer ? '<span class="web-badge">BeSoccer</span>' : '',
-    p.webSources?.footballpred ? '<span class="web-badge">FPred</span>' : '',
+    p.webSources?.['1xbet'] ? '<span class="web-badge odds-badge">1xBet</span>' : '',
   ].filter(Boolean).join('');
-  const noDataBadge = p.noApiData ? '<span class="no-data-badge">Données API limitées</span>' : '';
+  const modeBadge = p.webMode ? '<span class="no-data-badge">Mode Web</span>' : '';
+  const noDataBadge = !p.webMode && p.noApiData ? '<span class="no-data-badge">Données API limitées</span>' : '';
 
   return `
     <div class="card ${confClass}" data-id="${p.fixture.id}">
-      <div class="card-league">${p.fixture.league} · ${time} ${webBadges}${noDataBadge}</div>
+      <div class="card-league">${p.fixture.league} · ${time} ${webBadges}${modeBadge}${noDataBadge}</div>
       <div class="card-teams">
         <div class="team">
           ${p.fixture.homeLogo ? `<img src="${p.fixture.homeLogo}" alt="${p.fixture.home}" onerror="this.style.display='none'">` : ''}
@@ -109,6 +111,16 @@ function buildModalContent(p) {
         <div class="stat-box"><div class="label">Extérieur (2)</div><div class="value" style="color:var(--purple)">${p.probabilities.away}%</div></div>
       </div>
     </div>
+
+    ${p.odds ? `
+    <div class="detail-section">
+      <h3>Cotes 1xBet</h3>
+      <div class="grid-2" style="grid-template-columns:1fr 1fr 1fr">
+        <div class="stat-box"><div class="label">1 (Dom)</div><div class="value" style="color:var(--green)">${p.odds.home}</div></div>
+        <div class="stat-box"><div class="label">X (Nul)</div><div class="value" style="color:var(--yellow)">${p.odds.draw}</div></div>
+        <div class="stat-box"><div class="label">2 (Ext)</div><div class="value" style="color:var(--purple)">${p.odds.away}</div></div>
+      </div>
+    </div>` : ''}
 
     <div class="detail-section">
       <h3>Score algorithmique</h3>

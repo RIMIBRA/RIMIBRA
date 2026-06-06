@@ -227,6 +227,11 @@ main {
   margin-left: 4px;
 }
 
+.odds-badge {
+  background: rgba(63,185,80,0.15);
+  color: var(--green);
+}
+
 .no-data-badge {
   font-size: 0.62rem;
   padding: 0.1rem 0.4rem;

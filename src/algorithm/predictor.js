@@ -5,6 +5,7 @@ const { analyzeStandings } = require('./standings');
 const { analyzeInjuries } = require('./injuries');
 const scraper = require('../scraper/index');
 const footballpred = require('../scraper/footballpred');
+const { analyzeWebDay } = require('./webPredictor');
 
 const HOME_ADVANTAGE = 6;
 const MAX_FIXTURES_PER_DAY = 15;
@@ -131,10 +132,13 @@ async function analyzeFixture(fixture) {
     probabilities: finalProbs,
     recommendation,
     noApiData,
+    webMode: false,
     webSources: {
       besoccer: !!web.besoccer,
       footballpred: !!web.footballpred,
+      '1xbet': !!web.odds,
     },
+    odds: web.odds?.rawOdds || null,
     breakdown: {
       form: { home: formHome, away: formAway },
       h2h,
@@ -154,6 +158,11 @@ async function analyzeDayFixtures(date) {
   const upcoming = fixtures.filter(
     (f) => ['NS', 'TBD', '1H', 'HT', '2H'].includes(f.fixture.status.short)
   );
+
+  // Si pas de matchs en cache ET quota épuisé → mode web pur
+  if (upcoming.length === 0 && api.getDailyRequestCount() >= api.DAILY_LIMIT) {
+    return analyzeWebDay(fpredList);
+  }
 
   // Trier : matchs présents sur footballpredictions.com en premier
   upcoming.sort((a, b) => {
