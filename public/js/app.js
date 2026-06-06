@@ -76,6 +76,12 @@ function buildCard(p) {
           <div class="prob-value ${probClass(prob.away)}">${prob.away}%</div>
         </div>
       </div>
+      ${p.goalPrediction ? `
+      <div class="card-goals">
+        <span class="goal-item ${p.goalPrediction.over25 >= 55 ? 'goal-yes' : 'goal-no'}">+2.5 buts: ${p.goalPrediction.over25}%</span>
+        <span class="goal-sep">·</span>
+        <span class="goal-item ${p.goalPrediction.btts >= 50 ? 'goal-yes' : 'goal-no'}">BTTS: ${p.goalPrediction.btts}%</span>
+      </div>` : ''}
       <div class="card-recommendation">
         <span class="pick">✓ ${rec.pick}</span>
         <span class="confidence ${rec.confidence}">${rec.confidence}</span>
@@ -113,9 +119,26 @@ function buildModalContent(p) {
       </div>
     </div>
 
+    ${p.goalPrediction ? `
+    <div class="detail-section">
+      <h3>Analyse des buts</h3>
+      <div class="grid-2" style="grid-template-columns:1fr 1fr 1fr 1fr">
+        ${p.goalPrediction.xGHome !== null ? `
+        <div class="stat-box"><div class="label">xG ${p.fixture.home.substring(0,8)}</div><div class="value" style="color:var(--blue)">${p.goalPrediction.xGHome}</div></div>
+        <div class="stat-box"><div class="label">xG ${p.fixture.away.substring(0,8)}</div><div class="value" style="color:var(--blue)">${p.goalPrediction.xGAway}</div></div>
+        ` : ''}
+        <div class="stat-box"><div class="label">Plus de 1,5 buts</div><div class="value" style="color:${p.goalPrediction.over15 >= 60 ? 'var(--green)' : 'var(--muted)'}">${p.goalPrediction.over15}%</div></div>
+        <div class="stat-box"><div class="label">Plus de 2,5 buts</div><div class="value" style="color:${p.goalPrediction.over25 >= 50 ? 'var(--green)' : 'var(--muted)'}">${p.goalPrediction.over25}%</div></div>
+      </div>
+      <div class="grid-2" style="margin-top:0.5rem">
+        <div class="stat-box"><div class="label">Les deux marquent (BTTS)</div><div class="value" style="color:${p.goalPrediction.btts >= 50 ? 'var(--green)' : 'var(--muted)'}">${p.goalPrediction.btts}%</div></div>
+        <div class="stat-box"><div class="label">Moins de 2,5 buts</div><div class="value" style="color:${(100 - p.goalPrediction.over25) >= 50 ? 'var(--green)' : 'var(--muted)'}">${100 - p.goalPrediction.over25}%</div></div>
+      </div>
+    </div>` : ''}
+
     ${p.odds ? `
     <div class="detail-section">
-      <h3>Cotes 1xBet</h3>
+      <h3>Cotes bookmaker</h3>
       <div class="grid-2" style="grid-template-columns:1fr 1fr 1fr">
         <div class="stat-box"><div class="label">1 (Dom)</div><div class="value" style="color:var(--green)">${p.odds.home}</div></div>
         <div class="stat-box"><div class="label">X (Nul)</div><div class="value" style="color:var(--yellow)">${p.odds.draw}</div></div>

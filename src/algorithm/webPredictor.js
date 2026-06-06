@@ -3,6 +3,7 @@ const oddsapi = require('../scraper/oddsapi');
 const footballpred = require('../scraper/footballpred');
 const forebet = require('../scraper/forebet');
 const predictz = require('../scraper/predictz');
+const { goalHeuristic } = require('./goals');
 
 const MAX_WEB = 15;
 
@@ -73,6 +74,7 @@ async function analyzeWebDayWithFixtures(fixtures, fpredList, forebetList, oddsa
       const { sources, webSources, bscData, oddsMatch } = await buildWebPrediction(home, away, fpredList, fbList, ptzList, oddsList);
       const probs = blendSources(sources) || { home: 39, draw: 27, away: 34 };
       const rec = getRecommendation(probs, sources.length);
+      const goalPrediction = goalHeuristic(probs);
 
       results.push({
         fixture: {
@@ -86,6 +88,7 @@ async function analyzeWebDayWithFixtures(fixtures, fpredList, forebetList, oddsa
         },
         scores: { home: 50, away: 50 },
         probabilities: probs,
+        goalPrediction,
         recommendation: rec,
         noApiData: true,
         webMode: true,
@@ -139,6 +142,7 @@ async function analyzeWebDay(fpredList, oddsapiList) {
       );
       const probs = blendSources(sources) || { home: 39, draw: 27, away: 34 };
       const rec = getRecommendation(probs, sources.length);
+      const goalPrediction = goalHeuristic(probs);
 
       // Les entrées oddsapi ont commenceTime + league ; les autres ont seulement home/away
       const matchDate = match.commenceTime || match.date || new Date().toISOString();
@@ -157,6 +161,7 @@ async function analyzeWebDay(fpredList, oddsapiList) {
         },
         scores: { home: 50, away: 50 },
         probabilities: probs,
+        goalPrediction,
         recommendation: rec,
         noApiData: true,
         webMode: true,

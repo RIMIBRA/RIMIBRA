@@ -205,6 +205,20 @@ main {
 .prob-value.medium { color: var(--yellow); }
 .prob-value.low { color: var(--muted); }
 
+.card-goals {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.72rem;
+  padding: 0.3rem 0;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  margin-bottom: 0.2rem;
+}
+.goal-sep { color: var(--muted); }
+.goal-item { color: var(--muted); }
+.goal-yes { color: var(--green); font-weight: 600; }
+.goal-no  { color: var(--red); }
+
 .card-recommendation {
   display: flex;
   align-items: center;

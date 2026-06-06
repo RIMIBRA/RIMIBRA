@@ -3,6 +3,7 @@ const { analyzeForm } = require('./form');
 const { analyzeH2H } = require('./h2h');
 const { analyzeStandings } = require('./standings');
 const { analyzeInjuries } = require('./injuries');
+const { calcGoalPrediction } = require('./goals');
 const scraper = require('../scraper/index');
 const footballpred = require('../scraper/footballpred');
 const { analyzeWebDay, analyzeWebDayWithFixtures } = require('./webPredictor');
@@ -116,6 +117,7 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
   const finalProbs = scraper.blendProbabilities(algoProbs, web);
   const recommendation = getRecommendation(finalProbs, homeScore, awayScore, web);
   const noApiData = hasNoData(formHome, formAway, h2h);
+  const goalPrediction = calcGoalPrediction(formHome, formAway);
 
   return {
     fixture: {
@@ -132,6 +134,7 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
       away: Math.round(awayScore),
     },
     probabilities: finalProbs,
+    goalPrediction,
     recommendation,
     noApiData,
     webMode: false,
