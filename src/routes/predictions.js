@@ -6,9 +6,9 @@ const api = require('../api/client');
 router.get('/today', async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().split('T')[0];
-    const predictions = await analyzeDayFixtures(date);
+    const { results, total, analyzed } = await analyzeDayFixtures(date);
     const used = api.getDailyRequestCount();
-    res.json({ date, predictions, requestsUsed: used, requestsLeft: api.DAILY_LIMIT - used });
+    res.json({ date, predictions: results, total, analyzed, requestsUsed: used, requestsLeft: api.DAILY_LIMIT - used });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

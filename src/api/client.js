@@ -42,7 +42,11 @@ async function getFixturesByDate(date) {
 }
 
 async function getTeamLastMatches(teamId, count = 5) {
-  return apiGet('/fixtures', { team: teamId, last: count, status: 'FT' });
+  const results = await apiGet('/fixtures', { team: teamId, last: count });
+  // Keep only finished matches
+  return results.filter((f) =>
+    ['FT', 'AET', 'PEN', 'AWD', 'WO'].includes(f.fixture.status.short)
+  );
 }
 
 async function getH2H(team1Id, team2Id, last = 10) {

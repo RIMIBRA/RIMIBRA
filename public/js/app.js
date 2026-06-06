@@ -39,10 +39,15 @@ function buildCard(p) {
   const rec = p.recommendation;
   const confClass = rec.confidence === 'Élevée' ? 'confidence-high' : rec.confidence === 'Moyenne' ? 'confidence-medium' : 'confidence-low';
   const time = new Date(p.fixture.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  const webBadges = [
+    p.webSources?.besoccer ? '<span class="web-badge">BeSoccer</span>' : '',
+    p.webSources?.footballpred ? '<span class="web-badge">FPred</span>' : '',
+  ].filter(Boolean).join('');
+  const noDataBadge = p.noApiData ? '<span class="no-data-badge">Données API limitées</span>' : '';
 
   return `
     <div class="card ${confClass}" data-id="${p.fixture.id}">
-      <div class="card-league">${p.fixture.league} · ${time}</div>
+      <div class="card-league">${p.fixture.league} · ${time} ${webBadges}${noDataBadge}</div>
       <div class="card-teams">
         <div class="team">
           ${p.fixture.homeLogo ? `<img src="${p.fixture.homeLogo}" alt="${p.fixture.home}" onerror="this.style.display='none'">` : ''}

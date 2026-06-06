@@ -3,8 +3,10 @@ const { analyzeForm } = require('./form');
 const { analyzeH2H } = require('./h2h');
 const { analyzeStandings } = require('./standings');
 const { analyzeInjuries } = require('./injuries');
+const scraper = require('../scraper/index');
 
 const HOME_ADVANTAGE = 6;
+const MAX_FIXTURES_PER_DAY = 15; // limite pour préserver les requêtes API
 
 function calcWeights(standingsAvailable) {
   if (standingsAvailable) {
@@ -33,21 +35,32 @@ function calcProbabilities(homeScore, awayScore) {
   };
 }
 
-function getRecommendation(probs, homeScore, awayScore) {
+function getRecommendation(probs, homeScore, awayScore, webSources) {
   const diff = Math.abs(homeScore - awayScore);
-  const confidence = diff > 20 ? 'Élevée' : diff > 10 ? 'Moyenne' : 'Faible';
+  const hasWebData = webSources?.besoccer || webSources?.footballpred;
+
+  let confidence;
+  if (diff > 20) confidence = 'Élevée';
+  else if (diff > 10) confidence = hasWebData ? 'Élevée' : 'Moyenne';
+  else confidence = hasWebData ? 'Moyenne' : 'Faible';
 
   let pick;
   if (probs.home >= probs.away && probs.home >= probs.draw) pick = '1 (Domicile)';
   else if (probs.away >= probs.home && probs.away >= probs.draw) pick = '2 (Extérieur)';
   else pick = 'X (Nul)';
 
-  if (probs.draw > 28) {
-    const margin = Math.abs(homeScore - awayScore);
-    if (margin < 8) pick = 'X (Nul)';
-  }
+  if (probs.draw > 28 && Math.abs(homeScore - awayScore) < 8) pick = 'X (Nul)';
 
   return { pick, confidence };
+}
+
+function hasNoData(formHome, formAway, h2h) {
+  return (
+    formHome.score === 50 &&
+    formAway.score === 50 &&
+    h2h.score1 === 50 &&
+    h2h.score2 === 50
+  );
 }
 
 async function analyzeFixture(fixture) {
@@ -56,15 +69,22 @@ async function analyzeFixture(fixture) {
   const leagueId = fixture.league.id;
   const season = fixture.league.season;
   const fixtureId = fixture.fixture.id;
+  const date = fixture.fixture.date.split('T')[0];
 
-  const [homeForm, awayForm, h2hFixtures, standingsData, injuriesData] =
-    await Promise.allSettled([
+  // Lancer API et scraping en parallèle
+  const [apiResults, webSources] = await Promise.allSettled([
+    Promise.allSettled([
       api.getTeamLastMatches(homeTeam.id, 5),
       api.getTeamLastMatches(awayTeam.id, 5),
       api.getH2H(homeTeam.id, awayTeam.id, 10),
       api.getStandings(leagueId, season),
       api.getInjuries(fixtureId),
-    ]).then((results) => results.map((r) => (r.status === 'fulfilled' ? r.value : null)));
+    ]).then((results) => results.map((r) => (r.status === 'fulfilled' ? r.value : null))),
+    scraper.enrichFixture(homeTeam.name, awayTeam.name, date),
+  ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : null)));
+
+  const [homeForm, awayForm, h2hFixtures, standingsData, injuriesData] = apiResults || [null, null, null, null, null];
+  const web = webSources || {};
 
   const formHome = analyzeForm(homeForm, homeTeam.id);
   const formAway = analyzeForm(awayForm, awayTeam.id);
@@ -86,8 +106,12 @@ async function analyzeFixture(fixture) {
     h2h.score2 * weights.h2h +
     injuries.team2.score * weights.injuries;
 
-  const probs = calcProbabilities(homeScore, awayScore);
-  const recommendation = getRecommendation(probs, homeScore, awayScore);
+  const algoProbs = calcProbabilities(homeScore, awayScore);
+
+  // Fusionner avec les données web si disponibles
+  const finalProbs = scraper.blendProbabilities(algoProbs, web);
+  const recommendation = getRecommendation(finalProbs, homeScore, awayScore, web);
+  const noApiData = hasNoData(formHome, formAway, h2h);
 
   return {
     fixture: {
@@ -103,8 +127,13 @@ async function analyzeFixture(fixture) {
       home: Math.round(homeScore),
       away: Math.round(awayScore),
     },
-    probabilities: probs,
+    probabilities: finalProbs,
     recommendation,
+    noApiData,
+    webSources: {
+      besoccer: !!web.besoccer,
+      footballpred: !!web.footballpred,
+    },
     breakdown: {
       form: { home: formHome, away: formAway },
       h2h,
@@ -120,8 +149,11 @@ async function analyzeDayFixtures(date) {
     (f) => ['NS', 'TBD', '1H', 'HT', '2H'].includes(f.fixture.status.short)
   );
 
+  // Limiter pour préserver le quota API (1 requête fixtures + 4 par match = MAX*4+1)
+  const toAnalyze = upcoming.slice(0, MAX_FIXTURES_PER_DAY);
+
   const results = [];
-  for (const fixture of upcoming) {
+  for (const fixture of toAnalyze) {
     try {
       const analysis = await analyzeFixture(fixture);
       results.push(analysis);
@@ -142,12 +174,12 @@ async function analyzeDayFixtures(date) {
   results.sort((a, b) => {
     if (a.error) return 1;
     if (b.error) return -1;
-    const maxA = Math.max(a.probabilities.home, a.probabilities.away);
-    const maxB = Math.max(b.probabilities.home, b.probabilities.away);
+    const maxA = Math.max(a.probabilities?.home ?? 0, a.probabilities?.away ?? 0);
+    const maxB = Math.max(b.probabilities?.home ?? 0, b.probabilities?.away ?? 0);
     return maxB - maxA;
   });
 
-  return results;
+  return { results, total: upcoming.length, analyzed: toAnalyze.length };
 }
 
 module.exports = { analyzeFixture, analyzeDayFixtures };

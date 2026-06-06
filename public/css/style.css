@@ -218,6 +218,24 @@ main {
 .confidence.Moyenne { background: rgba(210,153,34,0.15); color: var(--yellow); }
 .confidence.Faible { background: rgba(139,148,158,0.15); color: var(--muted); }
 
+.web-badge {
+  font-size: 0.62rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: rgba(88,166,255,0.15);
+  color: var(--blue);
+  margin-left: 4px;
+}
+
+.no-data-badge {
+  font-size: 0.62rem;
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  background: rgba(210,153,34,0.15);
+  color: var(--yellow);
+  margin-left: 4px;
+}
+
 /* Modal */
 #modal {
   position: fixed;
