@@ -188,10 +188,30 @@ function buildModalContent(p) {
     </div>` : ''}
 
     <div class="detail-section">
-      <h3>Joueurs absents</h3>
+      <h3>Joueurs absents / suspendus</h3>
       <div class="grid-2">
-        <div class="stat-box"><div class="label">${p.fixture.home}</div><div class="value">${b.injuries.team1.count} absent(s)</div></div>
-        <div class="stat-box"><div class="label">${p.fixture.away}</div><div class="value">${b.injuries.team2.count} absent(s)</div></div>
+        <div class="stat-box">
+          <div class="label">${p.fixture.home} — ${b.injuries.team1.count} absent(s)</div>
+          ${b.injuries.team1.players?.length > 0
+            ? b.injuries.team1.players.map(pl => `
+              <div class="injury-row">
+                <span class="injury-name">${pl.name}</span>
+                <span class="injury-pos">${pl.position}</span>
+                <span class="injury-reason ${pl.suspended ? 'suspended' : 'injured'}">${pl.suspended ? '🟥 Suspendu' : '🤕 ' + pl.reason}</span>
+              </div>`).join('')
+            : '<div style="color:var(--muted);font-size:0.8rem">Aucun absent connu</div>'}
+        </div>
+        <div class="stat-box">
+          <div class="label">${p.fixture.away} — ${b.injuries.team2.count} absent(s)</div>
+          ${b.injuries.team2.players?.length > 0
+            ? b.injuries.team2.players.map(pl => `
+              <div class="injury-row">
+                <span class="injury-name">${pl.name}</span>
+                <span class="injury-pos">${pl.position}</span>
+                <span class="injury-reason ${pl.suspended ? 'suspended' : 'injured'}">${pl.suspended ? '🟥 Suspendu' : '🤕 ' + pl.reason}</span>
+              </div>`).join('')
+            : '<div style="color:var(--muted);font-size:0.8rem">Aucun absent connu</div>'}
+        </div>
       </div>
     </div>
   `;

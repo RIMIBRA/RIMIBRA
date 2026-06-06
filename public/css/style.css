@@ -337,6 +337,14 @@ main {
 .stat-box .label { font-size: 0.72rem; color: var(--muted); margin-bottom: 0.2rem; }
 .stat-box .value { font-size: 1rem; font-weight: 700; }
 
+.injury-row { display: flex; flex-direction: column; padding: 0.35rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+.injury-row:last-child { border-bottom: none; }
+.injury-name { font-size: 0.82rem; font-weight: 600; color: var(--text); }
+.injury-pos { font-size: 0.7rem; color: var(--muted); margin: 1px 0; }
+.injury-reason { font-size: 0.72rem; }
+.injury-reason.suspended { color: var(--red); }
+.injury-reason.injured { color: var(--yellow); }
+
 @media (max-width: 600px) {
   #predictions-grid { grid-template-columns: 1fr; }
   .grid-2 { grid-template-columns: 1fr; }
