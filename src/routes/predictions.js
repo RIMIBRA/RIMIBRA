@@ -35,15 +35,18 @@ router.get('/status', (req, res) => {
 router.get('/debug', async (req, res) => {
   const footballpred = require('../scraper/footballpred');
   const forebetScraper = require('../scraper/forebet');
+  const predictzScraper = require('../scraper/predictz');
   const besoccer = require('../scraper/besoccer');
   const { get1xbetOdds } = require('../scraper/odds');
   const date = new Date().toISOString().split('T')[0];
   const home = req.query.home || 'Arsenal';
   const away = req.query.away || 'Chelsea';
 
-  const [fpred, fb, bsc, odds] = await Promise.allSettled([
+  // Vider le cache pour forcer un vrai fetch
+  const [fpred, fb, ptz, bsc, odds] = await Promise.allSettled([
     footballpred.getTodayPredictions(date),
     forebetScraper.getTodayPredictions(date),
+    predictzScraper.getTodayPredictions(date),
     besoccer.getMatchData(home, away),
     get1xbetOdds(home, away),
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : { error: x.reason?.message })));
@@ -53,9 +56,42 @@ router.get('/debug', async (req, res) => {
     query: { home, away },
     footballpred: { count: fpred?.length ?? 0, first3: fpred?.slice(0, 3) ?? fpred },
     forebet:      { count: fb?.length   ?? 0, first3: fb?.slice(0, 3)    ?? fb   },
+    predictz:     { count: ptz?.length  ?? 0, first3: ptz?.slice(0, 3)   ?? ptz  },
     besoccer: bsc,
     '1xbet': odds,
   });
+});
+
+// Debug HTML brut : voir ce que le scraper reçoit réellement
+router.get('/debug-html', async (req, res) => {
+  const axios = require('axios');
+  const sites = {
+    forebet:  'https://www.forebet.com/en/football-tips-and-predictions-for-today/',
+    predictz: 'https://www.predictz.com/predictions/today/',
+    fpred:    'https://www.footballpredictions.com/predictions',
+    besoccer: 'https://www.besoccer.com/search?q=Arsenal+Chelsea&section=match',
+  };
+  const site = req.query.site || 'predictz';
+  const url = sites[site];
+  if (!url) return res.json({ error: 'site inconnu', sites: Object.keys(sites) });
+
+  try {
+    const { data, status } = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+      },
+      timeout: 12000,
+    });
+    // Retourner les 3000 premiers caractères du HTML
+    res.json({ site, url, status, htmlLength: data.length, preview: data.substring(0, 3000) });
+  } catch (err) {
+    res.json({ site, url, error: err.message, code: err.code });
+  }
 });
 
 module.exports = router;

@@ -2,6 +2,7 @@ const besoccer = require('../scraper/besoccer');
 const { get1xbetOdds } = require('../scraper/odds');
 const footballpred = require('../scraper/footballpred');
 const forebet = require('../scraper/forebet');
+const predictz = require('../scraper/predictz');
 
 const MAX_WEB = 15;
 
@@ -34,9 +35,10 @@ function getRecommendation(probs, sourceCount) {
   return { pick, confidence };
 }
 
-async function buildWebPrediction(homeTeam, awayTeam, fpredList, forebetList) {
-  const fpredMatch = footballpred.findPrediction(fpredList, homeTeam, awayTeam);
-  const forebetMatch = forebet.findPrediction(forebetList, homeTeam, awayTeam);
+async function buildWebPrediction(homeTeam, awayTeam, fpredList, forebetList, predictzList) {
+  const fpredMatch   = footballpred.findPrediction(fpredList,   homeTeam, awayTeam);
+  const forebetMatch = forebet.findPrediction(forebetList,      homeTeam, awayTeam);
+  const predictzMatch = predictz.findPrediction(predictzList,   homeTeam, awayTeam);
 
   const [bscData, oddsData] = await Promise.allSettled([
     besoccer.getMatchData(homeTeam, awayTeam),
@@ -44,20 +46,22 @@ async function buildWebPrediction(homeTeam, awayTeam, fpredList, forebetList) {
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : null)));
 
   const sources = [];
-  const webSources = { footballpred: false, forebet: false, besoccer: false, '1xbet': false };
+  const webSources = { footballpred: false, forebet: false, predictz: false, besoccer: false, '1xbet': false };
 
-  if (fpredMatch?.probabilities)   { sources.push(fpredMatch.probabilities);  webSources.footballpred = true; }
-  if (forebetMatch?.probabilities) { sources.push(forebetMatch.probabilities); webSources.forebet = true; }
-  if (bscData?.probabilities)      { sources.push(bscData.probabilities);      webSources.besoccer = true; }
-  if (oddsData)                    { sources.push(oddsData);                   webSources['1xbet'] = true; }
+  if (fpredMatch?.probabilities)    { sources.push(fpredMatch.probabilities);    webSources.footballpred = true; }
+  if (forebetMatch?.probabilities)  { sources.push(forebetMatch.probabilities);  webSources.forebet = true; }
+  if (predictzMatch?.probabilities) { sources.push(predictzMatch.probabilities); webSources.predictz = true; }
+  if (bscData?.probabilities)       { sources.push(bscData.probabilities);       webSources.besoccer = true; }
+  if (oddsData)                     { sources.push(oddsData);                    webSources['1xbet'] = true; }
 
   return { sources, webSources, bscData, oddsData };
 }
 
 // Mode web avec fixtures de l'API (logos, heures) mais prédictions web
 async function analyzeWebDayWithFixtures(fixtures, fpredList, forebetList) {
-  // Charger forebet si pas encore fait
-  const fbList = forebetList || await forebet.getTodayPredictions(new Date().toISOString().split('T')[0]);
+  const date = new Date().toISOString().split('T')[0];
+  const fbList = forebetList || await forebet.getTodayPredictions(date);
+  const ptzList = await predictz.getTodayPredictions(date);
 
   const results = [];
   for (const fixture of fixtures.slice(0, MAX_WEB)) {
@@ -65,7 +69,7 @@ async function analyzeWebDayWithFixtures(fixtures, fpredList, forebetList) {
     const away = fixture.teams.away.name;
 
     try {
-      const { sources, webSources, bscData, oddsData } = await buildWebPrediction(home, away, fpredList, fbList);
+      const { sources, webSources, bscData, oddsData } = await buildWebPrediction(home, away, fpredList, fbList, ptzList);
       const probs = blendSources(sources) || { home: 39, draw: 27, away: 34 };
       const rec = getRecommendation(probs, sources.length);
 
@@ -113,9 +117,12 @@ async function analyzeWebDayWithFixtures(fixtures, fpredList, forebetList) {
 // Mode web pur : liste de matchs depuis fpred/forebet
 async function analyzeWebDay(fpredList) {
   const date = new Date().toISOString().split('T')[0];
-  const forebetList = await forebet.getTodayPredictions(date);
+  const forebetList  = await forebet.getTodayPredictions(date);
+  const predictzList = await predictz.getTodayPredictions(date);
 
-  const matchList = fpredList?.length > 0 ? fpredList : forebetList;
+  const matchList = fpredList?.length > 0 ? fpredList
+    : forebetList?.length > 0 ? forebetList
+    : predictzList;
   if (!matchList || matchList.length === 0) {
     return { results: [], total: 0, analyzed: 0, webMode: true };
   }
@@ -124,7 +131,7 @@ async function analyzeWebDay(fpredList) {
   for (const match of matchList.slice(0, MAX_WEB)) {
     try {
       const { sources, webSources, bscData, oddsData } = await buildWebPrediction(
-        match.home, match.away, fpredList, forebetList
+        match.home, match.away, fpredList, forebetList, predictzList
       );
       const probs = blendSources(sources) || { home: 39, draw: 27, away: 34 };
       const rec = getRecommendation(probs, sources.length);
