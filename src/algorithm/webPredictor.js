@@ -115,14 +115,16 @@ async function analyzeWebDayWithFixtures(fixtures, fpredList, forebetList, oddsa
   return { results, total: fixtures.length, analyzed: results.length, webMode: true };
 }
 
-// Mode web pur : liste de matchs depuis fpred/forebet
+// Mode web pur : liste de matchs depuis oddsapi → fpred → forebet → predictz
 async function analyzeWebDay(fpredList, oddsapiList) {
   const date = new Date().toISOString().split('T')[0];
   const forebetList  = await forebet.getTodayPredictions(date);
   const predictzList = await predictz.getTodayPredictions(date);
   const oddsList = oddsapiList || await oddsapi.getTodayOdds();
 
-  const matchList = fpredList?.length > 0 ? fpredList
+  // Priorité : oddsapi (fiable, couvre amicaux + toutes ligues actives) → fpred → forebet → predictz
+  const matchList = oddsList?.length > 0 ? oddsList
+    : fpredList?.length > 0 ? fpredList
     : forebetList?.length > 0 ? forebetList
     : predictzList;
   if (!matchList || matchList.length === 0) {
@@ -138,11 +140,16 @@ async function analyzeWebDay(fpredList, oddsapiList) {
       const probs = blendSources(sources) || { home: 39, draw: 27, away: 34 };
       const rec = getRecommendation(probs, sources.length);
 
+      // Les entrées oddsapi ont commenceTime + league ; les autres ont seulement home/away
+      const matchDate = match.commenceTime || match.date || new Date().toISOString();
+      const matchLeague = match.league || 'Source: Web';
+      const oddsFromMatch = match.rawOdds || null;
+
       results.push({
         fixture: {
-          id: hashId(match.home + match.away),
-          date: new Date().toISOString(),
-          league: 'Source: Web',
+          id: match.id || hashId(match.home + match.away),
+          date: matchDate,
+          league: matchLeague,
           home: match.home,
           away: match.away,
           homeLogo: null,
@@ -154,7 +161,7 @@ async function analyzeWebDay(fpredList, oddsapiList) {
         noApiData: true,
         webMode: true,
         webSources,
-        odds: oddsMatch?.rawOdds || null,
+        odds: oddsMatch?.rawOdds || oddsFromMatch || null,
         breakdown: {
           form: {
             home: { score: 50, details: [] },

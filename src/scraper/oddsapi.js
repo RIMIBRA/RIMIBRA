@@ -2,16 +2,8 @@ const axios = require('axios');
 const cache = require('../cache/db');
 
 const BASE = 'https://api.the-odds-api.com/v4';
-const TTL = 6 * 3600;
-
-// Ligues prioritaires par ordre d'importance
-const LEAGUES = [
-  'soccer_epl', 'soccer_spain_la_liga', 'soccer_germany_bundesliga',
-  'soccer_italy_serie_a', 'soccer_france_ligue_one', 'soccer_uefa_champs_league',
-  'soccer_uefa_europa_league', 'soccer_conmebol_copa_libertadores',
-  'soccer_africa_cup_of_nations', 'soccer_fifa_world_cup',
-  'soccer_usa_mls', 'soccer_brazil_campeonato',
-];
+const TTL = 24 * 3600; // 1 appel par jour par ligue = ~450 req/mois (sous la limite free 500)
+const MAX_LEAGUES = 15;
 
 const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -25,6 +17,26 @@ function convertOdds(homeOdd, drawOdd, awayOdd) {
     draw: Math.round((d / total) * 100),
     away: Math.round((a / total) * 100),
   };
+}
+
+// Récupère les ligues soccer actuellement actives (matchs en cours ou à venir)
+async function getActiveSoccerLeagues() {
+  const cacheKey = 'oddsapi_sports';
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const { data } = await axios.get(`${BASE}/sports`, {
+    params: { apiKey: process.env.THE_ODDS_API_KEY, all: false },
+    timeout: 10000,
+  });
+
+  const leagues = data
+    .filter((s) => s.group === 'Soccer' && s.active)
+    .map((s) => s.key)
+    .slice(0, MAX_LEAGUES);
+
+  cache.set(cacheKey, leagues, 3600); // re-checker les ligues actives toutes les heures
+  return leagues;
 }
 
 async function fetchLeagueOdds(leagueKey) {
@@ -52,16 +64,22 @@ async function getTodayOdds() {
   const tomorrow = new Date(today.getTime() + 24 * 3600 * 1000);
   const results = [];
 
-  for (const league of LEAGUES) {
+  let leagues;
+  try {
+    leagues = await getActiveSoccerLeagues();
+  } catch {
+    leagues = []; // pas de clé ou réseau down → résultat vide, pas d'erreur
+  }
+
+  for (const league of leagues) {
     try {
       const matches = await fetchLeagueOdds(league);
       for (const match of matches) {
-        // Filtrer aux matchs du jour uniquement
         const matchDate = new Date(match.commence_time);
         if (matchDate < today || matchDate > tomorrow) continue;
 
         const bookmaker = match.bookmakers.find((b) =>
-          ['unibet', 'pinnacle', 'bet365', 'williamhill', 'bwin', '1xbet'].includes(b.key)
+          ['unibet', 'pinnacle', 'bet365', 'williamhill', 'bwin'].includes(b.key)
         ) || match.bookmakers[0];
 
         if (!bookmaker) continue;
@@ -86,7 +104,7 @@ async function getTodayOdds() {
         });
       }
     } catch {
-      continue; // Ligue non disponible ou quota épuisé
+      continue;
     }
   }
 
