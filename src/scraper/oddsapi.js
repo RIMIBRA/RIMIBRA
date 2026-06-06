@@ -3,7 +3,15 @@ const cache = require('../cache/db');
 
 const BASE = 'https://api.the-odds-api.com/v4';
 const TTL = 24 * 3600; // 1 appel par jour par ligue = ~450 req/mois (sous la limite free 500)
-const MAX_LEAGUES = 15;
+const MAX_LEAGUES = 20;
+
+// Ligues toujours incluses en priorité (même si absentes du top MAX_LEAGUES)
+const PRIORITY_LEAGUES = [
+  'soccer_international',
+  'soccer_fifa_world_cup',
+  'soccer_uefa_euro_qualification',
+  'soccer_conmebol_copa_america',
+];
 
 const norm = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
 
@@ -66,9 +74,12 @@ async function getTodayOdds() {
 
   let leagues;
   try {
-    leagues = await getActiveSoccerLeagues();
+    const dynamic = await getActiveSoccerLeagues();
+    // Ajouter les ligues prioritaires en tête si elles ne sont pas déjà dans la liste
+    const extra = PRIORITY_LEAGUES.filter((l) => !dynamic.includes(l));
+    leagues = [...extra, ...dynamic].slice(0, MAX_LEAGUES);
   } catch {
-    leagues = []; // pas de clé ou réseau down → résultat vide, pas d'erreur
+    leagues = PRIORITY_LEAGUES; // fallback minimal si la requête sports échoue
   }
 
   for (const league of leagues) {
