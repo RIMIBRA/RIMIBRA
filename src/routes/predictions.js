@@ -37,19 +37,20 @@ router.get('/debug', async (req, res) => {
   const forebetScraper = require('../scraper/forebet');
   const predictzScraper = require('../scraper/predictz');
   const besoccer = require('../scraper/besoccer');
-  const { get1xbetOdds } = require('../scraper/odds');
+  const oddsapiScraper = require('../scraper/oddsapi');
   const date = new Date().toISOString().split('T')[0];
   const home = req.query.home || 'Arsenal';
   const away = req.query.away || 'Chelsea';
 
-  // Vider le cache pour forcer un vrai fetch
-  const [fpred, fb, ptz, bsc, odds] = await Promise.allSettled([
+  const [fpred, fb, ptz, bsc, oddsAll] = await Promise.allSettled([
     footballpred.getTodayPredictions(date),
     forebetScraper.getTodayPredictions(date),
     predictzScraper.getTodayPredictions(date),
     besoccer.getMatchData(home, away),
-    get1xbetOdds(home, away),
+    oddsapiScraper.getTodayOdds(),
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : { error: x.reason?.message })));
+
+  const oddsMatch = Array.isArray(oddsAll) ? oddsapiScraper.findMatch(oddsAll, home, away) : null;
 
   res.json({
     date,
@@ -58,7 +59,11 @@ router.get('/debug', async (req, res) => {
     forebet:      { count: fb?.length   ?? 0, first3: fb?.slice(0, 3)    ?? fb   },
     predictz:     { count: ptz?.length  ?? 0, first3: ptz?.slice(0, 3)   ?? ptz  },
     besoccer: bsc,
-    '1xbet': odds,
+    oddsapi: {
+      totalToday: Array.isArray(oddsAll) ? oddsAll.length : oddsAll,
+      matchFound: oddsMatch,
+      keyConfigured: !!process.env.THE_ODDS_API_KEY,
+    },
   });
 });
 

@@ -7,6 +7,7 @@ const scraper = require('../scraper/index');
 const footballpred = require('../scraper/footballpred');
 const { analyzeWebDay, analyzeWebDayWithFixtures } = require('./webPredictor');
 const forebet = require('../scraper/forebet');
+const oddsapi = require('../scraper/oddsapi');
 
 const HOME_ADVANTAGE = 6;
 const MAX_FIXTURES_PER_DAY = 15;
@@ -40,7 +41,7 @@ function calcProbabilities(homeScore, awayScore) {
 
 function getRecommendation(probs, homeScore, awayScore, webSources) {
   const diff = Math.abs(homeScore - awayScore);
-  const hasWebData = webSources?.besoccer || webSources?.footballpred;
+  const hasWebData = webSources?.besoccer || webSources?.footballpred || webSources?.oddsapi;
 
   let confidence;
   if (diff > 20) confidence = 'Élevée';
@@ -66,7 +67,7 @@ function hasNoData(formHome, formAway, h2h) {
   );
 }
 
-async function analyzeFixture(fixture, fpredList = null, forebetList = null) {
+async function analyzeFixture(fixture, fpredList = null, forebetList = null, oddsapiList = null) {
   const homeTeam = fixture.teams.home;
   const awayTeam = fixture.teams.away;
   const leagueId = fixture.league.id;
@@ -83,7 +84,7 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null) {
       api.getStandings(leagueId, season),
       api.getInjuries(fixtureId),
     ]).then((results) => results.map((r) => (r.status === 'fulfilled' ? r.value : null))),
-    scraper.enrichFixture(homeTeam.name, awayTeam.name, date, fpredList, forebetList),
+    scraper.enrichFixture(homeTeam.name, awayTeam.name, date, fpredList, forebetList, oddsapiList),
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : null)));
 
   const [homeForm, awayForm, h2hFixtures, standingsData, injuriesData] = apiResults || [null, null, null, null, null];
@@ -138,9 +139,9 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null) {
       footballpred: !!web.footballpred,
       forebet: !!web.forebet,
       besoccer: !!web.besoccer,
-      '1xbet': !!web.odds,
+      oddsapi: !!web.oddsapi,
     },
-    odds: web.odds?.rawOdds || null,
+    odds: web.oddsapi?.rawOdds || null,
     breakdown: {
       form: { home: formHome, away: formAway },
       h2h,
@@ -151,11 +152,12 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null) {
 }
 
 async function analyzeDayFixtures(date) {
-  // Charger fixtures API + sources web en parallèle
-  const [fixtures, fpredList, forebetList] = await Promise.all([
+  // Charger fixtures API + sources web en parallèle (oddsapi = gratuit, pas de quota)
+  const [fixtures, fpredList, forebetList, oddsapiList] = await Promise.all([
     api.getFixturesByDate(date),
     footballpred.getTodayPredictions(date),
     forebet.getTodayPredictions(date),
+    oddsapi.getTodayOdds(),
   ]);
 
   const upcoming = fixtures.filter(
@@ -166,12 +168,12 @@ async function analyzeDayFixtures(date) {
 
   // Quota épuisé + fixtures en cache → mode web avec métadonnées API (logos, heures)
   if (apiLimited && upcoming.length > 0) {
-    return analyzeWebDayWithFixtures(upcoming, fpredList, forebetList);
+    return analyzeWebDayWithFixtures(upcoming, fpredList, forebetList, oddsapiList);
   }
 
   // Quota épuisé + pas de fixtures en cache → mode web pur (matchs depuis fpred/forebet)
   if (apiLimited && upcoming.length === 0) {
-    return analyzeWebDay(fpredList);
+    return analyzeWebDay(fpredList, oddsapiList);
   }
 
   // Trier : matchs présents sur footballpredictions.com en premier
@@ -188,7 +190,7 @@ async function analyzeDayFixtures(date) {
   const results = [];
   for (const fixture of toAnalyze) {
     try {
-      const analysis = await analyzeFixture(fixture, fpredList, forebetList);
+      const analysis = await analyzeFixture(fixture, fpredList, forebetList, oddsapiList);
       results.push(analysis);
     } catch (err) {
       results.push({

@@ -43,7 +43,7 @@ function buildCard(p) {
     p.webSources?.footballpred ? '<span class="web-badge">FPred</span>' : '',
     p.webSources?.forebet      ? '<span class="web-badge">Forebet</span>' : '',
     p.webSources?.besoccer     ? '<span class="web-badge">BeSoccer</span>' : '',
-    p.webSources?.['1xbet']    ? '<span class="web-badge odds-badge">1xBet</span>' : '',
+    p.webSources?.oddsapi      ? '<span class="web-badge odds-badge">OddsAPI</span>' : '',
   ].filter(Boolean).join('');
   const modeBadge = p.webMode ? '<span class="no-data-badge">Mode Web</span>' : '';
   const noDataBadge = !p.webMode && p.noApiData ? '<span class="no-data-badge">Données API limitées</span>' : '';

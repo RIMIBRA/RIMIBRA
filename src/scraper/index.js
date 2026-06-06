@@ -1,26 +1,27 @@
 const besoccer = require('./besoccer');
 const footballpred = require('./footballpred');
 const forebet = require('./forebet');
-const { get1xbetOdds } = require('./odds');
+const oddsapi = require('./oddsapi');
 
-// fpredList et forebetList sont passés depuis analyzeDayFixtures (pas de re-fetch)
-async function enrichFixture(homeTeam, awayTeam, date, fpredList = null, forebetList = null) {
+// Lists are passed from analyzeDayFixtures to avoid re-fetching per fixture
+async function enrichFixture(homeTeam, awayTeam, date, fpredList = null, forebetList = null, oddsapiList = null) {
   const fpredSource = fpredList || await footballpred.getTodayPredictions(date);
   const forebetSource = forebetList || await forebet.getTodayPredictions(date);
+  const oddsSource = oddsapiList || await oddsapi.getTodayOdds();
 
   const fpredMatch = footballpred.findPrediction(fpredSource, homeTeam, awayTeam);
   const forebetMatch = forebet.findPrediction(forebetSource, homeTeam, awayTeam);
+  const oddsMatch = oddsapi.findMatch(oddsSource, homeTeam, awayTeam);
 
-  const [bscData, oddsData] = await Promise.allSettled([
+  const [bscData] = await Promise.allSettled([
     besoccer.getMatchData(homeTeam, awayTeam),
-    get1xbetOdds(homeTeam, awayTeam),
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : null)));
 
   return {
     besoccer: bscData,
     footballpred: fpredMatch || null,
     forebet: forebetMatch || null,
-    odds: oddsData || null,
+    oddsapi: oddsMatch || null,
   };
 }
 
@@ -30,7 +31,7 @@ function blendProbabilities(algoProbabilities, webSources) {
   if (webSources.footballpred?.probabilities) externals.push(webSources.footballpred.probabilities);
   if (webSources.forebet?.probabilities)      externals.push(webSources.forebet.probabilities);
   if (webSources.besoccer?.probabilities)     externals.push(webSources.besoccer.probabilities);
-  if (webSources.odds)                        externals.push(webSources.odds);
+  if (webSources.oddsapi?.probabilities)      externals.push(webSources.oddsapi.probabilities);
 
   if (externals.length === 0) return algoProbabilities;
 
