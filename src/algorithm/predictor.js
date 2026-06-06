@@ -65,7 +65,7 @@ function hasNoData(formHome, formAway, h2h) {
   );
 }
 
-async function analyzeFixture(fixture) {
+async function analyzeFixture(fixture, fpredList = null) {
   const homeTeam = fixture.teams.home;
   const awayTeam = fixture.teams.away;
   const leagueId = fixture.league.id;
@@ -73,7 +73,7 @@ async function analyzeFixture(fixture) {
   const fixtureId = fixture.fixture.id;
   const date = fixture.fixture.date.split('T')[0];
 
-  // Lancer API et scraping en parallèle
+  // API + tous les scrapers web en parallèle (fpredList déjà récupéré, pas de re-fetch)
   const [apiResults, webSources] = await Promise.allSettled([
     Promise.allSettled([
       api.getTeamLastMatches(homeTeam.id, 5),
@@ -82,7 +82,7 @@ async function analyzeFixture(fixture) {
       api.getStandings(leagueId, season),
       api.getInjuries(fixtureId),
     ]).then((results) => results.map((r) => (r.status === 'fulfilled' ? r.value : null))),
-    scraper.enrichFixture(homeTeam.name, awayTeam.name, date),
+    scraper.enrichFixture(homeTeam.name, awayTeam.name, date, fpredList),
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : null)));
 
   const [homeForm, awayForm, h2hFixtures, standingsData, injuriesData] = apiResults || [null, null, null, null, null];
@@ -178,7 +178,7 @@ async function analyzeDayFixtures(date) {
   const results = [];
   for (const fixture of toAnalyze) {
     try {
-      const analysis = await analyzeFixture(fixture);
+      const analysis = await analyzeFixture(fixture, fpredList);
       results.push(analysis);
     } catch (err) {
       results.push({

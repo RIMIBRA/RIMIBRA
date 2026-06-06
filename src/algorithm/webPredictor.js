@@ -40,9 +40,10 @@ async function analyzeWebMatch(homeTeam, awayTeam, fpredProbs) {
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : null)));
 
   const sources = [];
-  const webSources = { fpred: false, besoccer: false, '1xbet': false };
+  const webSources = { footballpred: false, besoccer: false, '1xbet': false };
 
-  if (fpredProbs) { sources.push(fpredProbs); webSources.fpred = true; }
+  // footballpred en premier — source de référence
+  if (fpredProbs) { sources.push(fpredProbs); webSources.footballpred = true; }
   if (bscData?.probabilities) { sources.push(bscData.probabilities); webSources.besoccer = true; }
   if (oddsData) { sources.push(oddsData); webSources['1xbet'] = true; }
 
