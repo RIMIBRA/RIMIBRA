@@ -89,6 +89,46 @@ main {
 .controls button:hover { opacity: 0.85; }
 .controls button:disabled { opacity: 0.4; cursor: not-allowed; }
 
+.top-filters {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 1.2rem;
+  flex-wrap: wrap;
+}
+.filter-label { font-size: 0.82rem; color: var(--muted); margin-right: 0.25rem; }
+.filter-btn {
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 0.3rem 0.85rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.filter-btn:hover { border-color: var(--blue); color: var(--text); }
+.filter-btn.active {
+  background: var(--blue);
+  border-color: var(--blue);
+  color: #0d1117;
+  font-weight: 700;
+}
+
+.top-banner {
+  grid-column: 1 / -1;
+  background: linear-gradient(135deg, rgba(88,166,255,0.1), rgba(188,140,255,0.08));
+  border: 1px solid rgba(88,166,255,0.25);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.top-banner-title { font-weight: 700; font-size: 0.95rem; color: var(--blue); }
+.top-banner-sub { font-size: 0.75rem; color: var(--muted); }
+
 .hidden { display: none !important; }
 
 #loading {

@@ -7,9 +7,25 @@ const modal = document.getElementById('modal');
 const modalContent = document.getElementById('modal-content');
 const modalClose = document.getElementById('modal-close');
 const modalBackdrop = document.getElementById('modal-backdrop');
+const topFilters = document.getElementById('top-filters');
 
 const today = new Date().toISOString().split('T')[0];
 datePicker.value = today;
+
+let activeTopN = 0; // 0 = tous
+
+function rankScore(p) {
+  if (p.error) return -1;
+  const confScore = p.recommendation?.confidence === 'Élevée' ? 200
+    : p.recommendation?.confidence === 'Moyenne' ? 100 : 0;
+  const maxProb = Math.max(p.probabilities?.home ?? 0, p.probabilities?.draw ?? 0, p.probabilities?.away ?? 0);
+  return confScore + maxProb;
+}
+
+function getTopPredictions(predictions, n) {
+  const sorted = [...predictions].sort((a, b) => rankScore(b) - rankScore(a));
+  return n > 0 ? sorted.slice(0, n) : sorted;
+}
 
 function probClass(v) {
   if (v >= 50) return 'high';
@@ -231,6 +247,7 @@ async function loadPredictions(date) {
     if (!res.ok) throw new Error(data.error);
 
     allPredictions = data.predictions;
+    topFilters.classList.toggle('hidden', allPredictions.length === 0);
     updateApiStatus(data.requestsUsed, data.requestsLeft);
     if (data.limitReached) {
       errorBox.style.background = 'rgba(210,153,34,0.1)';
@@ -251,16 +268,25 @@ async function loadPredictions(date) {
 }
 
 function renderGrid(predictions) {
-  if (predictions.length === 0) {
+  const displayed = getTopPredictions(predictions, activeTopN);
+
+  if (displayed.length === 0) {
     grid.innerHTML = '<p style="color:var(--muted);text-align:center;padding:3rem">Aucun match trouvé pour cette date.</p>';
     return;
   }
-  grid.innerHTML = predictions.map(buildCard).join('');
+
+  const banner = activeTopN > 0 ? `
+    <div class="top-banner">
+      <span class="top-banner-title">🏆 Top ${activeTopN} — Meilleurs pronostics du jour</span>
+      <span class="top-banner-sub">Classés par confiance puis probabilité maximale · ${predictions.length} matchs analysés au total</span>
+    </div>` : '';
+
+  grid.innerHTML = banner + displayed.map(buildCard).join('');
 
   grid.querySelectorAll('.card:not(.has-error)').forEach((card) => {
     card.addEventListener('click', () => {
-      const id = parseInt(card.dataset.id);
-      const p = allPredictions.find((x) => x.fixture.id === id);
+      const id = card.dataset.id;
+      const p = allPredictions.find((x) => String(x.fixture.id) === id);
       if (!p) return;
       modalContent.innerHTML = buildModalContent(p);
       modal.classList.remove('hidden');
@@ -277,6 +303,15 @@ function updateApiStatus(used, remaining) {
 btnLoad.addEventListener('click', () => loadPredictions(datePicker.value));
 modalClose.addEventListener('click', () => modal.classList.add('hidden'));
 modalBackdrop.addEventListener('click', () => modal.classList.add('hidden'));
+
+topFilters.querySelectorAll('.filter-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    topFilters.querySelectorAll('.filter-btn').forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
+    activeTopN = parseInt(btn.dataset.n);
+    renderGrid(allPredictions);
+  });
+});
 
 async function initStatus() {
   try {
