@@ -8,7 +8,8 @@ router.get('/today', async (req, res) => {
     const date = req.query.date || new Date().toISOString().split('T')[0];
     const { results, total, analyzed } = await analyzeDayFixtures(date);
     const used = api.getDailyRequestCount();
-    res.json({ date, predictions: results, total, analyzed, requestsUsed: used, requestsLeft: api.DAILY_LIMIT - used });
+    const limitReached = used >= api.DAILY_LIMIT;
+    res.json({ date, predictions: results, total, analyzed, requestsUsed: used, requestsLeft: Math.max(0, api.DAILY_LIMIT - used), limitReached });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

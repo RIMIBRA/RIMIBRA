@@ -176,8 +176,16 @@ async function loadPredictions(date) {
 
     allPredictions = data.predictions;
     updateApiStatus(data.requestsUsed, data.requestsLeft);
+    if (data.limitReached) {
+      errorBox.style.background = 'rgba(210,153,34,0.1)';
+      errorBox.style.borderColor = 'var(--yellow)';
+      errorBox.style.color = 'var(--yellow)';
+      errorBox.textContent = '⚠️ Limite API atteinte (100 req/jour) — affichage depuis le cache. Se réinitialise à minuit.';
+      errorBox.classList.remove('hidden');
+    }
     renderGrid(allPredictions);
   } catch (err) {
+    errorBox.style = '';
     errorBox.textContent = 'Erreur: ' + err.message;
     errorBox.classList.remove('hidden');
   } finally {

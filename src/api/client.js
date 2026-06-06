@@ -15,14 +15,15 @@ const TTL = {
 };
 
 async function apiGet(endpoint, params = {}) {
-  const used = cache.getDailyRequestCount();
-  if (used >= DAILY_LIMIT) {
-    throw new Error(`Limite quotidienne atteinte (${DAILY_LIMIT} requêtes/jour)`);
-  }
-
+  // Vérifier le cache EN PREMIER — si les données sont là, pas besoin de compter la limite
   const cacheKey = endpoint + JSON.stringify(params);
   const cached = cache.get(cacheKey);
   if (cached) return cached;
+
+  const used = cache.getDailyRequestCount();
+  if (used >= DAILY_LIMIT) {
+    return []; // Retourner tableau vide plutôt que bloquer toute l'app
+  }
 
   const response = await axios.get(`${BASE_URL}${endpoint}`, {
     headers: { 'x-apisports-key': process.env.API_FOOTBALL_KEY },
