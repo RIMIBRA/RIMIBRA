@@ -4,9 +4,10 @@ const { analyzeH2H } = require('./h2h');
 const { analyzeStandings } = require('./standings');
 const { analyzeInjuries } = require('./injuries');
 const scraper = require('../scraper/index');
+const footballpred = require('../scraper/footballpred');
 
 const HOME_ADVANTAGE = 6;
-const MAX_FIXTURES_PER_DAY = 15; // limite pour préserver les requêtes API
+const MAX_FIXTURES_PER_DAY = 15;
 
 function calcWeights(standingsAvailable) {
   if (standingsAvailable) {
@@ -144,12 +145,25 @@ async function analyzeFixture(fixture) {
 }
 
 async function analyzeDayFixtures(date) {
-  const fixtures = await api.getFixturesByDate(date);
+  // Lancer en parallèle : fixtures API + liste footballpredictions.com
+  const [fixtures, fpredList] = await Promise.all([
+    api.getFixturesByDate(date),
+    footballpred.getTodayPredictions(date),
+  ]);
+
   const upcoming = fixtures.filter(
     (f) => ['NS', 'TBD', '1H', 'HT', '2H'].includes(f.fixture.status.short)
   );
 
-  // Limiter pour préserver le quota API (1 requête fixtures + 4 par match = MAX*4+1)
+  // Trier : matchs présents sur footballpredictions.com en premier
+  upcoming.sort((a, b) => {
+    const aInFpred = footballpred.isInFpred(fpredList, a.teams.home.name, a.teams.away.name);
+    const bInFpred = footballpred.isInFpred(fpredList, b.teams.home.name, b.teams.away.name);
+    if (aInFpred && !bInFpred) return -1;
+    if (!aInFpred && bInFpred) return 1;
+    return 0;
+  });
+
   const toAnalyze = upcoming.slice(0, MAX_FIXTURES_PER_DAY);
 
   const results = [];

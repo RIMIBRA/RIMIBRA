@@ -9,6 +9,8 @@ const HEADERS = {
   'Accept-Language': 'fr-FR,fr;q=0.9,en;q=0.8',
 };
 
+const normalize = (s) => (s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
 async function getTodayPredictions(date) {
   const key = `fpred_${date}`;
   const cached = cache.get(key);
@@ -32,10 +34,13 @@ async function getTodayPredictions(date) {
         if (!isNaN(v)) percents.push(v);
       });
 
-      if (home && away && percents.length >= 3) {
+      if (home && away) {
         predictions.push({
-          home, away,
-          probabilities: { home: percents[0], draw: percents[1], away: percents[2] },
+          home,
+          away,
+          probabilities: percents.length >= 3
+            ? { home: percents[0], draw: percents[1], away: percents[2] }
+            : null,
         });
       }
     });
@@ -47,12 +52,33 @@ async function getTodayPredictions(date) {
   }
 }
 
-function findPrediction(predictions, homeTeam, awayTeam) {
-  if (!predictions || predictions.length === 0) return null;
-  const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+// Vérifie si un match API figure dans la liste footballpred
+function isInFpred(fpredList, homeTeam, awayTeam) {
+  if (!fpredList || fpredList.length === 0) return false;
   const h = normalize(homeTeam);
   const a = normalize(awayTeam);
-  return predictions.find((p) => normalize(p.home).includes(h.slice(0, 5)) || normalize(p.away).includes(a.slice(0, 5))) || null;
+  return fpredList.some((p) => {
+    const ph = normalize(p.home);
+    const pa = normalize(p.away);
+    return (
+      ph.includes(h.slice(0, 5)) || h.includes(ph.slice(0, 5)) ||
+      pa.includes(a.slice(0, 5)) || a.includes(pa.slice(0, 5))
+    );
+  });
 }
 
-module.exports = { getTodayPredictions, findPrediction };
+function findPrediction(fpredList, homeTeam, awayTeam) {
+  if (!fpredList || fpredList.length === 0) return null;
+  const h = normalize(homeTeam);
+  const a = normalize(awayTeam);
+  return fpredList.find((p) => {
+    const ph = normalize(p.home);
+    const pa = normalize(p.away);
+    return (
+      ph.includes(h.slice(0, 5)) || h.includes(ph.slice(0, 5)) ||
+      pa.includes(a.slice(0, 5)) || a.includes(pa.slice(0, 5))
+    );
+  }) || null;
+}
+
+module.exports = { getTodayPredictions, isInFpred, findPrediction };
