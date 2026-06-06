@@ -5,7 +5,8 @@ const { analyzeStandings } = require('./standings');
 const { analyzeInjuries } = require('./injuries');
 const scraper = require('../scraper/index');
 const footballpred = require('../scraper/footballpred');
-const { analyzeWebDay } = require('./webPredictor');
+const { analyzeWebDay, analyzeWebDayWithFixtures } = require('./webPredictor');
+const forebet = require('../scraper/forebet');
 
 const HOME_ADVANTAGE = 6;
 const MAX_FIXTURES_PER_DAY = 15;
@@ -65,7 +66,7 @@ function hasNoData(formHome, formAway, h2h) {
   );
 }
 
-async function analyzeFixture(fixture, fpredList = null) {
+async function analyzeFixture(fixture, fpredList = null, forebetList = null) {
   const homeTeam = fixture.teams.home;
   const awayTeam = fixture.teams.away;
   const leagueId = fixture.league.id;
@@ -82,7 +83,7 @@ async function analyzeFixture(fixture, fpredList = null) {
       api.getStandings(leagueId, season),
       api.getInjuries(fixtureId),
     ]).then((results) => results.map((r) => (r.status === 'fulfilled' ? r.value : null))),
-    scraper.enrichFixture(homeTeam.name, awayTeam.name, date, fpredList),
+    scraper.enrichFixture(homeTeam.name, awayTeam.name, date, fpredList, forebetList),
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : null)));
 
   const [homeForm, awayForm, h2hFixtures, standingsData, injuriesData] = apiResults || [null, null, null, null, null];
@@ -134,8 +135,9 @@ async function analyzeFixture(fixture, fpredList = null) {
     noApiData,
     webMode: false,
     webSources: {
-      besoccer: !!web.besoccer,
       footballpred: !!web.footballpred,
+      forebet: !!web.forebet,
+      besoccer: !!web.besoccer,
       '1xbet': !!web.odds,
     },
     odds: web.odds?.rawOdds || null,
@@ -149,18 +151,26 @@ async function analyzeFixture(fixture, fpredList = null) {
 }
 
 async function analyzeDayFixtures(date) {
-  // Lancer en parallèle : fixtures API + liste footballpredictions.com
-  const [fixtures, fpredList] = await Promise.all([
+  // Charger fixtures API + sources web en parallèle
+  const [fixtures, fpredList, forebetList] = await Promise.all([
     api.getFixturesByDate(date),
     footballpred.getTodayPredictions(date),
+    forebet.getTodayPredictions(date),
   ]);
 
   const upcoming = fixtures.filter(
     (f) => ['NS', 'TBD', '1H', 'HT', '2H'].includes(f.fixture.status.short)
   );
 
-  // Si pas de matchs en cache ET quota épuisé → mode web pur
-  if (upcoming.length === 0 && api.getDailyRequestCount() >= api.DAILY_LIMIT) {
+  const apiLimited = api.getDailyRequestCount() >= api.DAILY_LIMIT;
+
+  // Quota épuisé + fixtures en cache → mode web avec métadonnées API (logos, heures)
+  if (apiLimited && upcoming.length > 0) {
+    return analyzeWebDayWithFixtures(upcoming, fpredList, forebetList);
+  }
+
+  // Quota épuisé + pas de fixtures en cache → mode web pur (matchs depuis fpred/forebet)
+  if (apiLimited && upcoming.length === 0) {
     return analyzeWebDay(fpredList);
   }
 
@@ -178,7 +188,7 @@ async function analyzeDayFixtures(date) {
   const results = [];
   for (const fixture of toAnalyze) {
     try {
-      const analysis = await analyzeFixture(fixture, fpredList);
+      const analysis = await analyzeFixture(fixture, fpredList, forebetList);
       results.push(analysis);
     } catch (err) {
       results.push({

@@ -40,9 +40,10 @@ function buildCard(p) {
   const confClass = rec.confidence === 'Élevée' ? 'confidence-high' : rec.confidence === 'Moyenne' ? 'confidence-medium' : 'confidence-low';
   const time = new Date(p.fixture.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
   const webBadges = [
-    p.webSources?.fpred || p.webSources?.footballpred ? '<span class="web-badge">FPred</span>' : '',
-    p.webSources?.besoccer ? '<span class="web-badge">BeSoccer</span>' : '',
-    p.webSources?.['1xbet'] ? '<span class="web-badge odds-badge">1xBet</span>' : '',
+    p.webSources?.footballpred ? '<span class="web-badge">FPred</span>' : '',
+    p.webSources?.forebet      ? '<span class="web-badge">Forebet</span>' : '',
+    p.webSources?.besoccer     ? '<span class="web-badge">BeSoccer</span>' : '',
+    p.webSources?.['1xbet']    ? '<span class="web-badge odds-badge">1xBet</span>' : '',
   ].filter(Boolean).join('');
   const modeBadge = p.webMode ? '<span class="no-data-badge">Mode Web</span>' : '';
   const noDataBadge = !p.webMode && p.noApiData ? '<span class="no-data-badge">Données API limitées</span>' : '';

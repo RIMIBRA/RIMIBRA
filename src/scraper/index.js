@@ -1,12 +1,15 @@
 const besoccer = require('./besoccer');
 const footballpred = require('./footballpred');
+const forebet = require('./forebet');
 const { get1xbetOdds } = require('./odds');
 
-// fpredList est passé directement depuis analyzeDayFixtures pour éviter un re-fetch
-async function enrichFixture(homeTeam, awayTeam, date, fpredList = null) {
-  // Si la liste fpred n'est pas fournie, la récupérer (avec cache)
+// fpredList et forebetList sont passés depuis analyzeDayFixtures (pas de re-fetch)
+async function enrichFixture(homeTeam, awayTeam, date, fpredList = null, forebetList = null) {
   const fpredSource = fpredList || await footballpred.getTodayPredictions(date);
+  const forebetSource = forebetList || await forebet.getTodayPredictions(date);
+
   const fpredMatch = footballpred.findPrediction(fpredSource, homeTeam, awayTeam);
+  const forebetMatch = forebet.findPrediction(forebetSource, homeTeam, awayTeam);
 
   const [bscData, oddsData] = await Promise.allSettled([
     besoccer.getMatchData(homeTeam, awayTeam),
@@ -16,6 +19,7 @@ async function enrichFixture(homeTeam, awayTeam, date, fpredList = null) {
   return {
     besoccer: bscData,
     footballpred: fpredMatch || null,
+    forebet: forebetMatch || null,
     odds: oddsData || null,
   };
 }
@@ -24,8 +28,9 @@ function blendProbabilities(algoProbabilities, webSources) {
   const externals = [];
 
   if (webSources.footballpred?.probabilities) externals.push(webSources.footballpred.probabilities);
-  if (webSources.besoccer?.probabilities) externals.push(webSources.besoccer.probabilities);
-  if (webSources.odds) externals.push(webSources.odds);
+  if (webSources.forebet?.probabilities)      externals.push(webSources.forebet.probabilities);
+  if (webSources.besoccer?.probabilities)     externals.push(webSources.besoccer.probabilities);
+  if (webSources.odds)                        externals.push(webSources.odds);
 
   if (externals.length === 0) return algoProbabilities;
 

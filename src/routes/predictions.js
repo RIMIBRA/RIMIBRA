@@ -31,4 +31,31 @@ router.get('/status', (req, res) => {
   res.json({ used, remaining: api.DAILY_LIMIT - used, limit: api.DAILY_LIMIT });
 });
 
+// Debug : tester chaque scraper individuellement
+router.get('/debug', async (req, res) => {
+  const footballpred = require('../scraper/footballpred');
+  const forebetScraper = require('../scraper/forebet');
+  const besoccer = require('../scraper/besoccer');
+  const { get1xbetOdds } = require('../scraper/odds');
+  const date = new Date().toISOString().split('T')[0];
+  const home = req.query.home || 'Arsenal';
+  const away = req.query.away || 'Chelsea';
+
+  const [fpred, fb, bsc, odds] = await Promise.allSettled([
+    footballpred.getTodayPredictions(date),
+    forebetScraper.getTodayPredictions(date),
+    besoccer.getMatchData(home, away),
+    get1xbetOdds(home, away),
+  ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : { error: x.reason?.message })));
+
+  res.json({
+    date,
+    query: { home, away },
+    footballpred: { count: fpred?.length ?? 0, first3: fpred?.slice(0, 3) ?? fpred },
+    forebet:      { count: fb?.length   ?? 0, first3: fb?.slice(0, 3)    ?? fb   },
+    besoccer: bsc,
+    '1xbet': odds,
+  });
+});
+
 module.exports = router;
