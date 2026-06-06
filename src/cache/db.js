@@ -1,64 +1,47 @@
-const Database = require('better-sqlite3');
+const fs = require('fs');
 const path = require('path');
 
-const DB_PATH = path.join(__dirname, '../../cache.db');
+const CACHE_FILE = path.join(__dirname, '../../cache-data.json');
+const LOG_FILE = path.join(__dirname, '../../cache-requests.json');
 
-let db;
+function readJson(file, fallback) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
+  catch { return fallback; }
+}
 
-function getDb() {
-  if (!db) {
-    db = new Database(DB_PATH);
-    db.pragma('journal_mode = WAL');
-    db.exec(`
-      CREATE TABLE IF NOT EXISTS cache (
-        key TEXT PRIMARY KEY,
-        data TEXT NOT NULL,
-        expires_at INTEGER NOT NULL
-      );
-      CREATE TABLE IF NOT EXISTS request_log (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        endpoint TEXT NOT NULL,
-        created_at INTEGER NOT NULL
-      );
-    `);
-  }
-  return db;
+function writeJson(file, data) {
+  fs.writeFileSync(file, JSON.stringify(data), 'utf8');
 }
 
 function get(key) {
-  const db = getDb();
-  const row = db.prepare('SELECT data, expires_at FROM cache WHERE key = ?').get(key);
-  if (!row) return null;
-  if (Date.now() > row.expires_at) {
-    db.prepare('DELETE FROM cache WHERE key = ?').run(key);
+  const store = readJson(CACHE_FILE, {});
+  const entry = store[key];
+  if (!entry) return null;
+  if (Date.now() > entry.expires_at) {
+    delete store[key];
+    writeJson(CACHE_FILE, store);
     return null;
   }
-  return JSON.parse(row.data);
+  return entry.data;
 }
 
 function set(key, data, ttlSeconds) {
-  const db = getDb();
-  db.prepare(
-    'INSERT OR REPLACE INTO cache (key, data, expires_at) VALUES (?, ?, ?)'
-  ).run(key, JSON.stringify(data), Date.now() + ttlSeconds * 1000);
+  const store = readJson(CACHE_FILE, {});
+  store[key] = { data, expires_at: Date.now() + ttlSeconds * 1000 };
+  writeJson(CACHE_FILE, store);
 }
 
 function logRequest(endpoint) {
-  const db = getDb();
-  db.prepare('INSERT INTO request_log (endpoint, created_at) VALUES (?, ?)').run(
-    endpoint,
-    Date.now()
-  );
+  const log = readJson(LOG_FILE, []);
+  log.push({ endpoint, created_at: Date.now() });
+  writeJson(LOG_FILE, log);
 }
 
 function getDailyRequestCount() {
-  const db = getDb();
+  const log = readJson(LOG_FILE, []);
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
-  const row = db.prepare(
-    'SELECT COUNT(*) as count FROM request_log WHERE created_at >= ?'
-  ).get(startOfDay.getTime());
-  return row.count;
+  return log.filter((entry) => entry.created_at >= startOfDay.getTime()).length;
 }
 
 module.exports = { get, set, logRequest, getDailyRequestCount };
