@@ -62,6 +62,28 @@ function buildCard(p) {
     p.webSources?.oddsapi      ? '<span class="web-badge odds-badge">OddsAPI</span>' : '',
   ].filter(Boolean).join('');
   const modeBadge = p.webMode ? '<span class="no-data-badge">Mode Web</span>' : '';
+
+  if (p.insufficientData) {
+    return `
+      <div class="card has-error" data-id="${p.fixture.id}">
+        <div class="card-league">${p.fixture.league} · ${time} ${webBadges}${modeBadge}</div>
+        <div class="card-teams">
+          <div class="team">
+            ${p.fixture.homeLogo ? `<img src="${p.fixture.homeLogo}" alt="${p.fixture.home}" onerror="this.style.display='none'">` : ''}
+            <div class="team-name">${p.fixture.home}</div>
+          </div>
+          <div class="vs">vs</div>
+          <div class="team">
+            ${p.fixture.awayLogo ? `<img src="${p.fixture.awayLogo}" alt="${p.fixture.away}" onerror="this.style.display='none'">` : ''}
+            <div class="team-name">${p.fixture.away}</div>
+          </div>
+        </div>
+        <div style="font-size:0.78rem;color:var(--muted);text-align:center;padding:0.4rem 0">
+          Données insuffisantes (forme, historique, cotes) pour une analyse fiable de ce match
+        </div>
+      </div>`;
+  }
+
   const noDataBadge = !p.webMode && p.noApiData ? '<span class="no-data-badge">Données API limitées</span>' : '';
 
   return `

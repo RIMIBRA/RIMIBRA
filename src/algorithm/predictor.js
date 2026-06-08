@@ -40,7 +40,11 @@ function calcProbabilities(homeScore, awayScore) {
   };
 }
 
-function getRecommendation(probs, homeScore, awayScore, webSources) {
+function getRecommendation(probs, homeScore, awayScore, webSources, insufficientData) {
+  if (insufficientData) {
+    return { pick: 'Analyse non disponible', confidence: 'Faible' };
+  }
+
   const diff = Math.abs(homeScore - awayScore);
   const hasWebData = webSources?.besoccer || webSources?.footballpred || webSources?.oddsapi;
 
@@ -115,8 +119,17 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
 
   // Fusionner avec les données web si disponibles
   const finalProbs = scraper.blendProbabilities(algoProbs, web);
-  const recommendation = getRecommendation(finalProbs, homeScore, awayScore, web);
   const noApiData = hasNoData(formHome, formAway, h2h);
+  const hasWebProbs = !!(
+    web.footballpred?.probabilities ||
+    web.forebet?.probabilities ||
+    web.besoccer?.probabilities ||
+    web.oddsapi?.probabilities
+  );
+  // Ni l'algo (forme/h2h inconnus) ni les sources web n'ont de signal exploitable :
+  // une prédiction chiffrée serait trompeuse (toujours la même valeur par défaut)
+  const insufficientData = noApiData && !hasWebProbs;
+  const recommendation = getRecommendation(finalProbs, homeScore, awayScore, web, insufficientData);
   const goalPrediction = calcGoalPrediction(formHome, formAway);
 
   return {
@@ -137,6 +150,7 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
     goalPrediction,
     recommendation,
     noApiData,
+    insufficientData,
     webMode: false,
     webSources: {
       footballpred: !!web.footballpred,
@@ -212,6 +226,8 @@ async function analyzeDayFixtures(date) {
   results.sort((a, b) => {
     if (a.error) return 1;
     if (b.error) return -1;
+    if (a.insufficientData && !b.insufficientData) return 1;
+    if (!a.insufficientData && b.insufficientData) return -1;
     const maxA = Math.max(a.probabilities?.home ?? 0, a.probabilities?.away ?? 0);
     const maxB = Math.max(b.probabilities?.home ?? 0, b.probabilities?.away ?? 0);
     return maxB - maxA;
