@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { analyzeDayFixtures, analyzeFixture } = require('../algorithm/predictor');
+const { analyzeDayFixtures, analyzeFixture, searchFixtures } = require('../algorithm/predictor');
 const api = require('../api/client');
 
 router.get('/today', async (req, res) => {
@@ -10,6 +10,21 @@ router.get('/today', async (req, res) => {
     const used = api.getDailyRequestCount();
     const limitReached = used >= api.DAILY_LIMIT;
     res.json({ date, predictions: results, total, analyzed, requestsUsed: used, requestsLeft: Math.max(0, api.DAILY_LIMIT - used), limitReached });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Recherche d'une équipe à une date donnée : analyse à la demande, même hors sélection auto
+router.get('/search', async (req, res) => {
+  try {
+    const date = req.query.date || new Date().toISOString().split('T')[0];
+    const q = (req.query.q || '').trim();
+    if (!q) return res.status(400).json({ error: 'Paramètre "q" requis' });
+
+    const { results, total } = await searchFixtures(date, q);
+    const used = api.getDailyRequestCount();
+    res.json({ date, query: q, predictions: results, total, requestsUsed: used, requestsLeft: Math.max(0, api.DAILY_LIMIT - used) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

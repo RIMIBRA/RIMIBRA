@@ -9,9 +9,21 @@ const footballpred = require('../scraper/footballpred');
 const { analyzeWebDay, analyzeWebDayWithFixtures } = require('./webPredictor');
 const forebet = require('../scraper/forebet');
 const oddsapi = require('../scraper/oddsapi');
+const { normalize, expandSearchTerms } = require('./teamAliases');
 
 const HOME_ADVANTAGE = 6;
 const MAX_FIXTURES_PER_DAY = 15;
+const MAX_SEARCH_RESULTS = 5;
+const UPCOMING_STATUSES = ['NS', 'TBD', '1H', 'HT', '2H'];
+
+// Compétitions jeunes / réserves : peu suivies (pas de cotes, pas d'historique exploitable),
+// on les laisse passer en dernier pour privilégier les rencontres avec de vraies données
+const MINOR_PATTERN = /\bU1[5-9]\b|\bU2[0-3]\b|\bYouth\b|\bJunior(?:s)?\b|\bReserves?\b|\bPrimavera\b|\bII\b/i;
+
+function isLikelyMinor(fixture) {
+  const text = `${fixture.league.name} ${fixture.teams.home.name} ${fixture.teams.away.name}`;
+  return MINOR_PATTERN.test(text);
+}
 
 function calcWeights(standingsAvailable) {
   if (standingsAvailable) {
@@ -177,9 +189,7 @@ async function analyzeDayFixtures(date) {
     oddsapi.getTodayOdds(),
   ]);
 
-  const upcoming = fixtures.filter(
-    (f) => ['NS', 'TBD', '1H', 'HT', '2H'].includes(f.fixture.status.short)
-  );
+  const upcoming = fixtures.filter((f) => UPCOMING_STATUSES.includes(f.fixture.status.short));
 
   const apiLimited = api.getDailyRequestCount() >= api.DAILY_LIMIT;
 
@@ -193,21 +203,20 @@ async function analyzeDayFixtures(date) {
     return analyzeWebDay(fpredList, oddsapiList);
   }
 
-  // Trier : matchs couverts par un bookmaker (oddsapi) ou footballpredictions.com en premier —
-  // ce sont les matchs "suivis" (donc avec de vraies données exploitables), pas seulement
-  // les compétitions obscures qui produiraient une analyse "données insuffisantes"
-  upcoming.sort((a, b) => {
-    const aHasOdds = !!oddsapi.findMatch(oddsapiList, a.teams.home.name, a.teams.away.name);
-    const bHasOdds = !!oddsapi.findMatch(oddsapiList, b.teams.home.name, b.teams.away.name);
-    if (aHasOdds && !bHasOdds) return -1;
-    if (!aHasOdds && bHasOdds) return 1;
+  // Trier les matchs à analyser en priorité : les rencontres "suivies" (cotes bookmaker,
+  // footballpredictions) passent devant, et les compétitions jeunes/réserves/obscures
+  // (qui n'ont ni historique ni cotes exploitables → analyse "données insuffisantes")
+  // sont reléguées en fin de liste, pour laisser la place aux matchs vraiment intéressants
+  // (ex : amicaux de sélections nationales avant une Coupe du Monde)
+  function fixtureRank(f) {
+    let score = 0;
+    if (oddsapi.findMatch(oddsapiList, f.teams.home.name, f.teams.away.name)) score += 2;
+    if (footballpred.isInFpred(fpredList, f.teams.home.name, f.teams.away.name)) score += 1;
+    if (isLikelyMinor(f)) score -= 3;
+    return score;
+  }
 
-    const aInFpred = footballpred.isInFpred(fpredList, a.teams.home.name, a.teams.away.name);
-    const bInFpred = footballpred.isInFpred(fpredList, b.teams.home.name, b.teams.away.name);
-    if (aInFpred && !bInFpred) return -1;
-    if (!aInFpred && bInFpred) return 1;
-    return 0;
-  });
+  upcoming.sort((a, b) => fixtureRank(b) - fixtureRank(a));
 
   const toAnalyze = upcoming.slice(0, MAX_FIXTURES_PER_DAY);
 
@@ -243,4 +252,49 @@ async function analyzeDayFixtures(date) {
   return { results, total: upcoming.length, analyzed: toAnalyze.length };
 }
 
-module.exports = { analyzeFixture, analyzeDayFixtures };
+function fixtureMatchesQuery(fixture, terms) {
+  const home = normalize(fixture.teams.home.name);
+  const away = normalize(fixture.teams.away.name);
+  return terms.some((t) => home.includes(t) || away.includes(t));
+}
+
+// Recherche à la demande : permet de retrouver et d'analyser n'importe quel match du jour,
+// même s'il n'a pas été retenu dans la sélection automatique (limitée par le quota API)
+async function searchFixtures(date, query) {
+  const terms = expandSearchTerms(query);
+  const fixtures = await api.getFixturesByDate(date);
+  const upcoming = fixtures.filter((f) => UPCOMING_STATUSES.includes(f.fixture.status.short));
+  const matched = upcoming.filter((f) => fixtureMatchesQuery(f, terms)).slice(0, MAX_SEARCH_RESULTS);
+
+  if (matched.length === 0) {
+    return { results: [], total: upcoming.length };
+  }
+
+  const [fpredList, forebetList, oddsapiList] = await Promise.all([
+    footballpred.getTodayPredictions(date),
+    forebet.getTodayPredictions(date),
+    oddsapi.getTodayOdds(),
+  ]);
+
+  const results = [];
+  for (const fixture of matched) {
+    try {
+      results.push(await analyzeFixture(fixture, fpredList, forebetList, oddsapiList));
+    } catch (err) {
+      results.push({
+        fixture: {
+          id: fixture.fixture.id,
+          date: fixture.fixture.date,
+          league: `${fixture.league.name} — ${fixture.league.country}`,
+          home: fixture.teams.home.name,
+          away: fixture.teams.away.name,
+        },
+        error: err.message,
+      });
+    }
+  }
+
+  return { results, total: upcoming.length };
+}
+
+module.exports = { analyzeFixture, analyzeDayFixtures, searchFixtures };

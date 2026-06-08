@@ -8,6 +8,9 @@ const modalContent = document.getElementById('modal-content');
 const modalClose = document.getElementById('modal-close');
 const modalBackdrop = document.getElementById('modal-backdrop');
 const topFilters = document.getElementById('top-filters');
+const searchInput = document.getElementById('search-input');
+const btnSearch = document.getElementById('btn-search');
+const searchResults = document.getElementById('search-results');
 
 const today = new Date().toISOString().split('T')[0];
 datePicker.value = today;
@@ -349,6 +352,18 @@ async function loadPredictions(date) {
   }
 }
 
+function attachCardClickHandlers(container, predictions) {
+  container.querySelectorAll('.card:not(.has-error)').forEach((card) => {
+    card.addEventListener('click', () => {
+      const id = card.dataset.id;
+      const p = predictions.find((x) => String(x.fixture.id) === id);
+      if (!p) return;
+      modalContent.innerHTML = buildModalContent(p);
+      modal.classList.remove('hidden');
+    });
+  });
+}
+
 function renderGrid(predictions) {
   const displayed = getTopPredictions(predictions, activeTopN);
 
@@ -365,20 +380,11 @@ function renderGrid(predictions) {
 
   const coverageNote = lastMeta.total > lastMeta.analyzed ? `
     <p style="grid-column:1/-1;font-size:0.78rem;color:var(--muted);margin-bottom:0.75rem">
-      ℹ️ ${lastMeta.analyzed} matchs analysés en détail sur ${lastMeta.total} disponibles aujourd'hui — la limite quotidienne de l'API restreint le nombre de matchs traités (les plus suivis par les bookmakers sont priorisés). D'autres rencontres (amicaux, compétitions mineures) peuvent ne pas apparaître ici.
+      ℹ️ ${lastMeta.analyzed} matchs analysés en détail sur ${lastMeta.total} disponibles aujourd'hui — la limite quotidienne de l'API restreint le nombre de matchs traités (les plus suivis par les bookmakers sont priorisés). D'autres rencontres (amicaux, compétitions mineures) peuvent ne pas apparaître ici. Utilisez la recherche pour les retrouver.
     </p>` : '';
 
   grid.innerHTML = banner + coverageNote + displayed.map(buildCard).join('');
-
-  grid.querySelectorAll('.card:not(.has-error)').forEach((card) => {
-    card.addEventListener('click', () => {
-      const id = card.dataset.id;
-      const p = allPredictions.find((x) => String(x.fixture.id) === id);
-      if (!p) return;
-      modalContent.innerHTML = buildModalContent(p);
-      modal.classList.remove('hidden');
-    });
-  });
+  attachCardClickHandlers(grid, allPredictions);
 }
 
 function updateApiStatus(used, remaining) {
@@ -386,6 +392,47 @@ function updateApiStatus(used, remaining) {
   badge.textContent = `API: ${used}/100 requêtes`;
   badge.className = remaining > 30 ? 'ok' : remaining > 10 ? 'warn' : 'danger';
 }
+
+let searchPredictions = [];
+
+async function searchTeam() {
+  const q = searchInput.value.trim();
+  if (!q) return;
+
+  btnSearch.disabled = true;
+  loading.classList.remove('hidden');
+  errorBox.classList.add('hidden');
+  searchResults.classList.add('hidden');
+  searchResults.innerHTML = '';
+
+  try {
+    const res = await fetch(`/api/predictions/search?date=${datePicker.value}&q=${encodeURIComponent(q)}`);
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error);
+
+    searchPredictions = data.predictions;
+    updateApiStatus(data.requestsUsed, data.requestsLeft);
+
+    if (searchPredictions.length === 0) {
+      searchResults.innerHTML = `<p style="grid-column:1/-1;color:var(--muted);text-align:center;padding:1.5rem">Aucun match avec « ${q} » trouvé pour cette date (${data.total} matchs au total ce jour-là). Essayez avec le nom anglais de l'équipe (ex. « Netherlands » au lieu de « Pays-Bas »).</p>`;
+    } else {
+      const note = `<p style="grid-column:1/-1;font-size:0.8rem;color:var(--muted)">🔍 ${searchPredictions.length} match(s) trouvé(s) pour « ${q} » — analyse à la demande (en dehors de la sélection automatique)</p>`;
+      searchResults.innerHTML = note + searchPredictions.map(buildCard).join('');
+      attachCardClickHandlers(searchResults, searchPredictions);
+    }
+    searchResults.classList.remove('hidden');
+  } catch (err) {
+    errorBox.style = '';
+    errorBox.textContent = 'Erreur recherche: ' + err.message;
+    errorBox.classList.remove('hidden');
+  } finally {
+    loading.classList.add('hidden');
+    btnSearch.disabled = false;
+  }
+}
+
+btnSearch.addEventListener('click', searchTeam);
+searchInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') searchTeam(); });
 
 btnLoad.addEventListener('click', () => loadPredictions(datePicker.value));
 modalClose.addEventListener('click', () => modal.classList.add('hidden'));
