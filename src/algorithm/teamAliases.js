@@ -67,6 +67,8 @@ const ALIASES = {
   'irak': 'iraq',
   'jamaïque': 'jamaica',
   'jamaique': 'jamaica',
+  'trinité-et-tobago': 'trinidad and tobago',
+  'trinite-et-tobago': 'trinidad and tobago',
   'états-unis': 'united states',
   'etats-unis': 'united states',
   'usa': 'united states',
