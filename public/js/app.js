@@ -33,6 +33,43 @@ function probClass(v) {
   return 'low';
 }
 
+// Conseille un pari "victoire sèche" quand un résultat domine nettement,
+// sinon une "double chance" (deux issues combinées) quand le match est incertain
+function buildBetAdvice(p) {
+  const { home, draw, away } = p.probabilities;
+  const max = Math.max(home, draw, away);
+
+  if (max >= 50) {
+    const label = home === max ? `Victoire sèche : ${p.fixture.home}`
+      : away === max ? `Victoire sèche : ${p.fixture.away}`
+      : 'Match nul';
+    return { short: label, detail: `Issue dominante (${max}%) — un pari simple semble justifié.` };
+  }
+
+  const doubleChances = [
+    { code: '1X', val: home + draw, label: `Double chance : ${p.fixture.home} ou match nul` },
+    { code: 'X2', val: draw + away, label: `Double chance : match nul ou ${p.fixture.away}` },
+    { code: '12', val: home + away, label: `Double chance : ${p.fixture.home} ou ${p.fixture.away} (sans nul)` },
+  ].sort((a, b) => b.val - a.val);
+  const best = doubleChances[0];
+
+  return { short: best.label, detail: `Match incertain (issue la plus probable à ${max}%) — une double chance (${best.val}%) est plus sûre qu'un pari sec.` };
+}
+
+function bttsVerdict(gp) {
+  if (!gp) return null;
+  if (gp.btts >= 55) return { text: 'Oui, probable', cls: 'goal-yes' };
+  if (gp.btts <= 40) return { text: 'Non, peu probable', cls: 'goal-no' };
+  return { text: 'Incertain', cls: 'goal-item' };
+}
+
+function goalsVerdict(gp) {
+  if (!gp) return null;
+  if (gp.over25 >= 55) return `Match probablement riche en buts — environ 3 buts ou plus (Plus de 2,5 : ${gp.over25}%)`;
+  if (gp.over15 >= 55) return `Total modéré attendu — environ 2 à 3 buts (Plus de 1,5 : ${gp.over15}%, Plus de 2,5 : ${gp.over25}%)`;
+  return `Match probablement pauvre en buts — environ 0 à 2 buts (Moins de 2,5 : ${100 - gp.over25}%)`;
+}
+
 function renderFormBadges(details) {
   return details.map((d) => `<span class="form-badge ${d.result}" title="${d.opponent}: ${d.scored}-${d.conceded}">${d.result}</span>`).join('');
 }
@@ -118,10 +155,10 @@ function buildCard(p) {
       <div class="card-goals">
         <span class="goal-item ${p.goalPrediction.over25 >= 55 ? 'goal-yes' : 'goal-no'}">+2.5 buts: ${p.goalPrediction.over25}%</span>
         <span class="goal-sep">·</span>
-        <span class="goal-item ${p.goalPrediction.btts >= 50 ? 'goal-yes' : 'goal-no'}">BTTS: ${p.goalPrediction.btts}%</span>
+        <span class="goal-item ${bttsVerdict(p.goalPrediction).cls}">BTTS: ${bttsVerdict(p.goalPrediction).text} (${p.goalPrediction.btts}%)</span>
       </div>` : ''}
       <div class="card-recommendation">
-        <span class="pick">✓ ${rec.pick}</span>
+        <span class="pick">✓ ${buildBetAdvice(p).short}</span>
         <span class="confidence ${rec.confidence}">${rec.confidence}</span>
       </div>
     </div>`;
@@ -155,6 +192,27 @@ function buildModalContent(p) {
         <div class="stat-box"><div class="label">Nul (X)</div><div class="value" style="color:var(--yellow)">${p.probabilities.draw}%</div></div>
         <div class="stat-box"><div class="label">Extérieur (2)</div><div class="value" style="color:var(--purple)">${p.probabilities.away}%</div></div>
       </div>
+    </div>
+
+    <div class="detail-section">
+      <h3>Conseil de pari</h3>
+      <div class="stat-box">
+        <div class="label">Issue du match</div>
+        <div class="value" style="color:var(--blue);font-size:0.95rem">${buildBetAdvice(p).short}</div>
+        <div style="font-size:0.75rem;color:var(--muted);margin-top:0.3rem">${buildBetAdvice(p).detail}</div>
+      </div>
+      ${p.goalPrediction ? `
+      <div class="grid-2" style="margin-top:0.5rem">
+        <div class="stat-box">
+          <div class="label">Les deux équipes marquent (BTTS) ?</div>
+          <div class="value ${bttsVerdict(p.goalPrediction).cls === 'goal-yes' ? '' : ''}" style="color:${bttsVerdict(p.goalPrediction).cls === 'goal-yes' ? 'var(--green)' : bttsVerdict(p.goalPrediction).cls === 'goal-no' ? 'var(--red)' : 'var(--muted)'}">${bttsVerdict(p.goalPrediction).text}</div>
+          <div style="font-size:0.75rem;color:var(--muted);margin-top:0.2rem">Probabilité estimée : ${p.goalPrediction.btts}%</div>
+        </div>
+        <div class="stat-box">
+          <div class="label">Nombre de buts attendu</div>
+          <div style="font-size:0.8rem;margin-top:0.2rem">${goalsVerdict(p.goalPrediction)}</div>
+        </div>
+      </div>` : ''}
     </div>
 
     ${p.goalPrediction ? `
@@ -256,6 +314,7 @@ function buildModalContent(p) {
 }
 
 let allPredictions = [];
+let lastMeta = { total: 0, analyzed: 0 };
 
 async function loadPredictions(date) {
   btnLoad.disabled = true;
@@ -269,6 +328,7 @@ async function loadPredictions(date) {
     if (!res.ok) throw new Error(data.error);
 
     allPredictions = data.predictions;
+    lastMeta = { total: data.total ?? allPredictions.length, analyzed: data.analyzed ?? allPredictions.length };
     topFilters.classList.toggle('hidden', allPredictions.length === 0);
     updateApiStatus(data.requestsUsed, data.requestsLeft);
     if (data.limitReached) {
@@ -303,7 +363,12 @@ function renderGrid(predictions) {
       <span class="top-banner-sub">Classés par confiance puis probabilité maximale · ${predictions.length} matchs analysés au total</span>
     </div>` : '';
 
-  grid.innerHTML = banner + displayed.map(buildCard).join('');
+  const coverageNote = lastMeta.total > lastMeta.analyzed ? `
+    <p style="grid-column:1/-1;font-size:0.78rem;color:var(--muted);margin-bottom:0.75rem">
+      ℹ️ ${lastMeta.analyzed} matchs analysés en détail sur ${lastMeta.total} disponibles aujourd'hui — la limite quotidienne de l'API restreint le nombre de matchs traités (les plus suivis par les bookmakers sont priorisés). D'autres rencontres (amicaux, compétitions mineures) peuvent ne pas apparaître ici.
+    </p>` : '';
+
+  grid.innerHTML = banner + coverageNote + displayed.map(buildCard).join('');
 
   grid.querySelectorAll('.card:not(.has-error)').forEach((card) => {
     card.addEventListener('click', () => {

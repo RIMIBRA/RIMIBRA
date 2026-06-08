@@ -193,8 +193,15 @@ async function analyzeDayFixtures(date) {
     return analyzeWebDay(fpredList, oddsapiList);
   }
 
-  // Trier : matchs présents sur footballpredictions.com en premier
+  // Trier : matchs couverts par un bookmaker (oddsapi) ou footballpredictions.com en premier —
+  // ce sont les matchs "suivis" (donc avec de vraies données exploitables), pas seulement
+  // les compétitions obscures qui produiraient une analyse "données insuffisantes"
   upcoming.sort((a, b) => {
+    const aHasOdds = !!oddsapi.findMatch(oddsapiList, a.teams.home.name, a.teams.away.name);
+    const bHasOdds = !!oddsapi.findMatch(oddsapiList, b.teams.home.name, b.teams.away.name);
+    if (aHasOdds && !bHasOdds) return -1;
+    if (!aHasOdds && bHasOdds) return 1;
+
     const aInFpred = footballpred.isInFpred(fpredList, a.teams.home.name, a.teams.away.name);
     const bInFpred = footballpred.isInFpred(fpredList, b.teams.home.name, b.teams.away.name);
     if (aInFpred && !bInFpred) return -1;
