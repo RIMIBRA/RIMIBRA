@@ -25,7 +25,7 @@ async function enrichFixture(homeTeam, awayTeam, date, fpredList = null, forebet
   };
 }
 
-function blendProbabilities(algoProbabilities, webSources) {
+function blendProbabilities(algoProbabilities, webSources, anchorAlgo = true) {
   const externals = [];
 
   if (webSources.footballpred?.probabilities) externals.push(webSources.footballpred.probabilities);
@@ -35,8 +35,10 @@ function blendProbabilities(algoProbabilities, webSources) {
 
   if (externals.length === 0) return algoProbabilities;
 
-  // Algo compte double pour rester l'ancre principale
-  const all = [algoProbabilities, algoProbabilities, ...externals];
+  // anchorAlgo=true (données algo réelles) : l'algo compte double — il reste l'ancre principale
+  // anchorAlgo=false (algo sans données, valeurs 50/50 par défaut) : les cotes bookmaker
+  //   dominent seules, sans être polluées par le bruit des valeurs par défaut de l'algo
+  const all = anchorAlgo ? [algoProbabilities, algoProbabilities, ...externals] : externals;
   const blended = {
     home: Math.round(all.reduce((s, p) => s + p.home, 0) / all.length),
     draw: Math.round(all.reduce((s, p) => s + p.draw, 0) / all.length),

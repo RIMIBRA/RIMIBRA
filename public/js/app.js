@@ -245,11 +245,16 @@ function buildModalContent(p) {
       </div>
     </div>` : ''}
 
+    ${!p.noApiData ? `
     <div class="detail-section">
       <h3>Score algorithmique</h3>
       ${barRow(p.fixture.home.substring(0, 8), p.scores.home)}
       ${barRow(p.fixture.away.substring(0, 8), p.scores.away)}
-    </div>
+    </div>` : `
+    <div class="detail-section">
+      <h3>Score algorithmique</h3>
+      <p style="font-size:0.8rem;color:var(--muted)">⚠️ Score non calculé — données API indisponibles pour ces équipes (quota épuisé ou données absentes). Seules les cotes bookmaker ont été utilisées pour la prédiction.</p>
+    </div>`}
 
     <div class="detail-section">
       <h3>Forme récente (5 derniers matchs)</h3>

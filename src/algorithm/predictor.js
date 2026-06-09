@@ -129,8 +129,7 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
 
   const algoProbs = calcProbabilities(homeScore, awayScore);
 
-  // Fusionner avec les données web si disponibles
-  const finalProbs = scraper.blendProbabilities(algoProbs, web);
+  // Calculer les flags AVANT le blend pour décider comment pondérer
   const noApiData = hasNoData(formHome, formAway, h2h);
   const hasWebProbs = !!(
     web.footballpred?.probabilities ||
@@ -141,6 +140,11 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
   // Ni l'algo (forme/h2h inconnus) ni les sources web n'ont de signal exploitable :
   // une prédiction chiffrée serait trompeuse (toujours la même valeur par défaut)
   const insufficientData = noApiData && !hasWebProbs;
+
+  // Quand l'algo n'a pas de données réelles (forme/H2H vides), ne pas le compter double
+  // dans le blend — laisser les cotes bookmaker (oddsapi) exprimer leur signal sans être
+  // noyées par le bruit 50/50 des valeurs par défaut de l'algo
+  const finalProbs = scraper.blendProbabilities(algoProbs, web, !noApiData);
   const recommendation = getRecommendation(finalProbs, homeScore, awayScore, web, insufficientData);
   const goalPrediction = calcGoalPrediction(formHome, formAway);
 
