@@ -100,6 +100,8 @@ function buildCard(p) {
     p.webSources?.forebet      ? '<span class="web-badge">Forebet</span>' : '',
     p.webSources?.besoccer     ? '<span class="web-badge">BeSoccer</span>' : '',
     p.webSources?.oddsapi      ? '<span class="web-badge odds-badge">OddsAPI</span>' : '',
+    p.webSources?.flashscore   ? '<span class="web-badge odds-badge">Flashscore</span>' : '',
+    p.webSources?.soccerway    ? '<span class="web-badge" style="background:rgba(16,185,129,0.15);color:#10b981">Soccerway</span>' : '',
   ].filter(Boolean).join('');
   const modeBadge = p.webMode ? '<span class="no-data-badge">Mode Web</span>' : '';
 

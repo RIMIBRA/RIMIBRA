@@ -9,6 +9,7 @@ const footballpred = require('../scraper/footballpred');
 const { analyzeWebDay, analyzeWebDayWithFixtures } = require('./webPredictor');
 const forebet = require('../scraper/forebet');
 const oddsapi = require('../scraper/oddsapi');
+const soccerway = require('../scraper/soccerway');
 const { normalize, expandSearchTerms } = require('./teamAliases');
 
 const HOME_ADVANTAGE = 6;
@@ -92,7 +93,7 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
   const fixtureId = fixture.fixture.id;
   const date = fixture.fixture.date.split('T')[0];
 
-  // API + tous les scrapers web en parallèle (fpredList déjà récupéré, pas de re-fetch)
+  // API + enrichissement web en parallèle (fpredList déjà récupéré, pas de re-fetch)
   const [apiResults, webSources] = await Promise.allSettled([
     Promise.allSettled([
       api.getTeamLastMatches(homeTeam.id, 5),
@@ -104,11 +105,22 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
     scraper.enrichFixture(homeTeam.name, awayTeam.name, date, fpredList, forebetList, oddsapiList),
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : null)));
 
-  const [homeForm, awayForm, h2hFixtures, standingsData, injuriesData] = apiResults || [null, null, null, null, null];
+  const [homeFixtures, awayFixtures, h2hFixtures, standingsData, injuriesData] = apiResults || [null, null, null, null, null];
   const web = webSources || {};
 
-  const formHome = analyzeForm(homeForm, homeTeam.id);
-  const formAway = analyzeForm(awayForm, awayTeam.id);
+  let formHome = analyzeForm(homeFixtures, homeTeam.id);
+  let formAway = analyzeForm(awayFixtures, awayTeam.id);
+
+  // Soccerway comme fallback : si l'API n'a pas fourni de données de forme
+  // (quota épuisé ou équipe non documentée), on essaie le scraper web
+  if (formHome.score === 50 && (!homeFixtures || homeFixtures.length === 0)) {
+    const swHome = await soccerway.getTeamForm(homeTeam.name).catch(() => null);
+    if (swHome) formHome = swHome;
+  }
+  if (formAway.score === 50 && (!awayFixtures || awayFixtures.length === 0)) {
+    const swAway = await soccerway.getTeamForm(awayTeam.name).catch(() => null);
+    if (swAway) formAway = swAway;
+  }
   const h2h = analyzeH2H(h2hFixtures, homeTeam.id, awayTeam.id);
   const standings = analyzeStandings(standingsData, homeTeam.id, awayTeam.id);
   const injuries = analyzeInjuries(injuriesData, homeTeam.id, awayTeam.id);
@@ -173,8 +185,10 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
       forebet: !!web.forebet,
       besoccer: !!web.besoccer,
       oddsapi: !!web.oddsapi,
+      flashscore: !!web.flashscore,
+      soccerway: formHome.source === 'soccerway' || formAway.source === 'soccerway',
     },
-    odds: web.oddsapi?.rawOdds || null,
+    odds: web.oddsapi?.rawOdds || web.flashscore?.rawOdds || null,
     breakdown: {
       form: { home: formHome, away: formAway },
       h2h,

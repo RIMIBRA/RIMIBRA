@@ -2,6 +2,7 @@ const besoccer = require('./besoccer');
 const footballpred = require('./footballpred');
 const forebet = require('./forebet');
 const oddsapi = require('./oddsapi');
+const flashscore = require('./flashscore');
 
 // Lists are passed from analyzeDayFixtures to avoid re-fetching per fixture
 async function enrichFixture(homeTeam, awayTeam, date, fpredList = null, forebetList = null, oddsapiList = null) {
@@ -13,8 +14,11 @@ async function enrichFixture(homeTeam, awayTeam, date, fpredList = null, forebet
   const forebetMatch = forebet.findPrediction(forebetSource, homeTeam, awayTeam);
   const oddsMatch = oddsapi.findMatch(oddsSource, homeTeam, awayTeam);
 
-  const [bscData] = await Promise.allSettled([
+  // Scraping en parallèle — les deux peuvent échouer sans bloquer l'analyse
+  const [bscData, fsData] = await Promise.allSettled([
     besoccer.getMatchData(homeTeam, awayTeam),
+    // Flashscore : seulement si oddsapi n'a pas trouvé de cotes pour ce match
+    oddsMatch ? Promise.resolve(null) : flashscore.getMatchOdds(homeTeam, awayTeam),
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : null)));
 
   return {
@@ -22,16 +26,18 @@ async function enrichFixture(homeTeam, awayTeam, date, fpredList = null, forebet
     footballpred: fpredMatch || null,
     forebet: forebetMatch || null,
     oddsapi: oddsMatch || null,
+    flashscore: fsData || null,
   };
 }
 
 function blendProbabilities(algoProbabilities, webSources, anchorAlgo = true) {
   const externals = [];
 
-  if (webSources.footballpred?.probabilities) externals.push(webSources.footballpred.probabilities);
-  if (webSources.forebet?.probabilities)      externals.push(webSources.forebet.probabilities);
-  if (webSources.besoccer?.probabilities)     externals.push(webSources.besoccer.probabilities);
-  if (webSources.oddsapi?.probabilities)      externals.push(webSources.oddsapi.probabilities);
+  if (webSources.footballpred?.probabilities)  externals.push(webSources.footballpred.probabilities);
+  if (webSources.forebet?.probabilities)       externals.push(webSources.forebet.probabilities);
+  if (webSources.besoccer?.probabilities)      externals.push(webSources.besoccer.probabilities);
+  if (webSources.oddsapi?.probabilities)       externals.push(webSources.oddsapi.probabilities);
+  if (webSources.flashscore?.probabilities)    externals.push(webSources.flashscore.probabilities);
 
   if (externals.length === 0) return algoProbabilities;
 
