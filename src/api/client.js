@@ -3,9 +3,13 @@ const axios = require('axios');
 const cache = require('../cache/db');
 
 const BASE_URL = 'https://v3.football.api-sports.io';
-const DAILY_LIMIT = 100;
+// Plan Pro actif : 7500 req/jour (mets à jour si tu changes de formule)
+const DAILY_LIMIT = 7500;
 
 const TTL = {
+  // Court délibérément : cette liste contient le statut (NS/live/FT) de chaque match.
+  // Un TTL long ferait afficher des matchs déjà terminés comme "à venir" pendant des heures.
+  fixturesToday: 5 * 60,
   fixtures: 6 * 3600,
   standings: 24 * 3600,
   h2h: 7 * 24 * 3600,
@@ -14,7 +18,7 @@ const TTL = {
   leagues: 24 * 3600,
 };
 
-async function apiGet(endpoint, params = {}) {
+async function apiGet(endpoint, params = {}, ttlOverride = null) {
   // Vérifier le cache EN PREMIER — si les données sont là, pas besoin de compter la limite
   const cacheKey = endpoint + JSON.stringify(params);
   const cached = cache.get(cacheKey);
@@ -33,13 +37,13 @@ async function apiGet(endpoint, params = {}) {
   cache.logRequest(endpoint);
   const data = response.data.response;
   const ttlKey = Object.keys(TTL).find((k) => endpoint.includes(k)) || 'fixtures';
-  cache.set(cacheKey, data, TTL[ttlKey]);
+  cache.set(cacheKey, data, ttlOverride ?? TTL[ttlKey]);
 
   return data;
 }
 
 async function getFixturesByDate(date) {
-  return apiGet('/fixtures', { date });
+  return apiGet('/fixtures', { date }, TTL.fixturesToday);
 }
 
 async function getTeamLastMatches(teamId, count = 5) {

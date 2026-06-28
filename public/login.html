@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Connexion — RIMIBRA Predictor</title>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/login.css">
+</head>
+<body>
+  <div class="auth-page">
+    <div class="auth-box">
+      <h1>🔐 RIMIBRA Predictor</h1>
+
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-tab="login">Connexion</button>
+        <button class="auth-tab" data-tab="register">Créer un compte</button>
+      </div>
+
+      <form id="login-form" class="auth-form">
+        <input type="email" id="login-email" placeholder="Email" required autocomplete="email">
+        <input type="password" id="login-password" placeholder="Mot de passe" required autocomplete="current-password">
+        <button type="submit">Se connecter</button>
+      </form>
+
+      <form id="register-form" class="auth-form hidden">
+        <input type="email" id="register-email" placeholder="Email" required autocomplete="email">
+        <input type="password" id="register-password" placeholder="Mot de passe (8 caractères min.)" required autocomplete="new-password" minlength="8">
+        <button type="submit">Créer mon compte</button>
+      </form>
+
+      <p id="auth-error" class="auth-error hidden"></p>
+      <a href="/" class="auth-skip">Continuer sans compte (accès limité)</a>
+    </div>
+  </div>
+
+  <script src="/js/auth.js"></script>
+  <script src="/js/login.js"></script>
+</body>
+</html>

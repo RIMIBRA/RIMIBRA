@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const { analyzeDayFixtures, analyzeFixture, searchFixtures } = require('../algorithm/predictor');
 const api = require('../api/client');
+const { requireFeature, requireAdmin } = require('../auth/middleware');
+const { isFreePreviewMatch } = require('../auth/tiers');
 
 router.get('/today', async (req, res) => {
   try {
@@ -9,14 +11,33 @@ router.get('/today', async (req, res) => {
     const { results, total, analyzed } = await analyzeDayFixtures(date);
     const used = api.getDailyRequestCount();
     const limitReached = used >= api.DAILY_LIMIT;
-    res.json({ date, predictions: results, total, analyzed, requestsUsed: used, requestsLeft: Math.max(0, api.DAILY_LIMIT - used), limitReached });
+
+    const plan = req.user?.plan || 'free';
+    const isFreeTier = plan === 'free' && !req.user?.isAdmin;
+    // Plan gratuit : aperçu limité à une sélection d'équipes populaires, pour donner envie de passer premium
+    // (les admins voient tout, sans filtre, même si leur plan en base est "free")
+    const visibleResults = isFreeTier
+      ? results.filter((r) => r.finished || isFreePreviewMatch(r.fixture.home, r.fixture.away))
+      : results;
+
+    res.json({
+      date,
+      predictions: visibleResults,
+      total,
+      analyzed,
+      requestsUsed: used,
+      requestsLeft: Math.max(0, api.DAILY_LIMIT - used),
+      limitReached,
+      freePreview: isFreeTier,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // Recherche d'une équipe à une date donnée : analyse à la demande, même hors sélection auto
-router.get('/search', async (req, res) => {
+// Réservée aux abonnés premium et plus
+router.get('/search', requireFeature('search'), async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().split('T')[0];
     const q = (req.query.q || '').trim();
@@ -46,8 +67,8 @@ router.get('/status', (req, res) => {
   res.json({ used, remaining: api.DAILY_LIMIT - used, limit: api.DAILY_LIMIT });
 });
 
-// Debug : tester chaque scraper individuellement
-router.get('/debug', async (req, res) => {
+// Debug : tester chaque scraper individuellement — réservé aux admins (consomme du quota/Puppeteer)
+router.get('/debug', requireAdmin, async (req, res) => {
   const footballpred = require('../scraper/footballpred');
   const forebetScraper = require('../scraper/forebet');
   const predictzScraper = require('../scraper/predictz');
@@ -83,7 +104,7 @@ router.get('/debug', async (req, res) => {
 });
 
 // Debug HTML brut : voir ce que le scraper reçoit réellement
-router.get('/debug-html', async (req, res) => {
+router.get('/debug-html', requireAdmin, async (req, res) => {
   const axios = require('axios');
   const sites = {
     forebet:  'https://www.forebet.com/en/football-tips-and-predictions-for-today/',

@@ -11,11 +11,89 @@ const forebet = require('../scraper/forebet');
 const oddsapi = require('../scraper/oddsapi');
 const soccerway = require('../scraper/soccerway');
 const { normalize, expandSearchTerms } = require('./teamAliases');
+const { mapWithConcurrency } = require('../utils/concurrency');
 
 const HOME_ADVANTAGE = 6;
-const MAX_FIXTURES_PER_DAY = 15;
+const MAX_FIXTURES_PER_DAY = 30;
+// Les matchs s'analysent en parallèle (pas un par un) — limité pour ne pas saturer le
+// navigateur Puppeteer partagé ni déclencher de blocage anti-bot sur les sites scrapés
+const ANALYSIS_CONCURRENCY = 10;
 const MAX_SEARCH_RESULTS = 5;
 const UPCOMING_STATUSES = ['NS', 'TBD', '1H', 'HT', '2H'];
+const LIVE_STATUSES = ['1H', 'HT', '2H'];
+const FINISHED_STATUSES = ['FT', 'AET', 'PEN', 'AWD', 'WO'];
+
+// Trois états pour permettre un filtre Terminés / En cours / À venir côté interface.
+// Heuristique anti-données-périmées : certaines compétitions amateurs/amicales ne sont
+// jamais mises à jour par le fournisseur (statut "NS" qui reste figé). Si le coup d'envoi
+// est passé depuis plus de STALE_HOURS, on considère le match terminé plutôt que de le
+// laisser polluer la liste "à venir" avec une heure manifestement dépassée.
+const STALE_HOURS = 3;
+
+function matchStateFor(statusShort, kickoffIso) {
+  if (FINISHED_STATUSES.includes(statusShort)) return 'finished';
+  if (LIVE_STATUSES.includes(statusShort)) return 'live';
+  if (kickoffIso) {
+    const hoursSinceKickoff = (Date.now() - new Date(kickoffIso).getTime()) / 3600000;
+    if (hoursSinceKickoff > STALE_HOURS) return 'finished';
+  }
+  return 'upcoming';
+}
+
+// Compare chaque type de prédiction au résultat réel — uniquement calculable une fois le
+// match terminé. Couvre l'issue (1X2) et, si une prédiction de buts a été faite, BTTS et +/-2,5.
+function computeValidation(predictedPick, homeScore, awayScore, goalPrediction) {
+  if (homeScore == null || awayScore == null) return null;
+  let actualPick;
+  if (homeScore > awayScore) actualPick = '1 (Domicile)';
+  else if (awayScore > homeScore) actualPick = '2 (Extérieur)';
+  else actualPick = 'X (Nul)';
+
+  const result = {
+    actualScore: { home: homeScore, away: awayScore },
+    actualPick,
+    correct: actualPick === predictedPick,
+  };
+
+  if (goalPrediction) {
+    const actualBtts = homeScore > 0 && awayScore > 0;
+    const actualOver25 = homeScore + awayScore > 2.5;
+
+    // btts/over25 entre 41 et 54% = pas de pronostic tranché, rien à valider (correct: null)
+    result.btts = goalPrediction.btts >= 55 || goalPrediction.btts <= 40
+      ? {
+          predicted: goalPrediction.btts >= 55 ? 'Oui' : 'Non',
+          actual: actualBtts ? 'Oui' : 'Non',
+          correct: (goalPrediction.btts >= 55) === actualBtts,
+        }
+      : null;
+
+    result.over25 = {
+      predicted: goalPrediction.over25 >= 55 ? 'Plus de 2,5' : 'Moins de 2,5',
+      actual: actualOver25 ? 'Plus de 2,5' : 'Moins de 2,5',
+      correct: (goalPrediction.over25 >= 55) === actualOver25,
+    };
+  }
+
+  return result;
+}
+
+function buildFinishedEntry(f) {
+  return {
+    fixture: {
+      id: f.fixture.id,
+      date: f.fixture.date,
+      league: `${f.league.name} — ${f.league.country}`,
+      home: f.teams.home.name,
+      away: f.teams.away.name,
+      homeLogo: f.teams.home.logo,
+      awayLogo: f.teams.away.logo,
+    },
+    finished: true,
+    matchState: 'finished',
+    finalScore: { home: f.goals.home, away: f.goals.away },
+  };
+}
 
 // Compétitions jeunes / réserves : peu suivies (pas de cotes, pas d'historique exploitable),
 // on les laisse passer en dernier pour privilégier les rencontres avec de vraies données
@@ -24,6 +102,35 @@ const MINOR_PATTERN = /\bU1[5-9]\b|\bU2[0-3]\b|\bYouth\b|\bJunior(?:s)?\b|\bRese
 function isLikelyMinor(fixture) {
   const text = `${fixture.league.name} ${fixture.teams.home.name} ${fixture.teams.away.name}`;
   return MINOR_PATTERN.test(text);
+}
+
+// Compétitions majeures : historique riche, cotes disponibles, suivi médiatique fort —
+// les pronostics y sont nettement plus fiables que sur une ligue amateur obscure.
+// Identifiants vérifiés directement via l'API (ne pas se fier aux noms, trop fragiles).
+const PRIORITY_LEAGUE_IDS = new Set([
+  1,   // Coupe du Monde
+  4,   // Euro (Championnat d'Europe des nations)
+  9,   // Copa America
+  2,   // UEFA Champions League
+  3,   // UEFA Europa League
+  848, // UEFA Europa Conference League
+  39,  // Premier League (Angleterre)
+  140, // La Liga (Espagne)
+  135, // Serie A (Italie)
+  78,  // Bundesliga (Allemagne)
+  61,  // Ligue 1 (France)
+  88,  // Eredivisie (Pays-Bas)
+  94,  // Primeira Liga (Portugal)
+  203, // Süper Lig (Turquie)
+  71,  // Brasileirão Série A (Brésil)
+  128, // Liga Profesional (Argentine)
+  253, // MLS (USA)
+  262, // Liga MX (Mexique)
+  98,  // J1 League (Japon)
+]);
+
+function isPriorityLeague(fixture) {
+  return PRIORITY_LEAGUE_IDS.has(fixture.league.id);
 }
 
 function calcWeights(standingsAvailable) {
@@ -92,6 +199,14 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
   const season = fixture.league.season;
   const fixtureId = fixture.fixture.id;
   const date = fixture.fixture.date.split('T')[0];
+  // Ligues U15-23/jeunes/réserves OU ligues obscures sans aucune couverture (pas de cotes,
+  // pas de footballpred, pas une compétition majeure) : le fallback Puppeteer (~10s) y trouve
+  // très rarement quelque chose d'exploitable — pas la peine de payer ce coût en temps
+  const minor = isLikelyMinor(fixture) || (
+    !isPriorityLeague(fixture) &&
+    !oddsapi.findMatch(oddsapiList, homeTeam.name, awayTeam.name) &&
+    !footballpred.isInFpred(fpredList, homeTeam.name, awayTeam.name)
+  );
 
   // API + enrichissement web en parallèle (fpredList déjà récupéré, pas de re-fetch)
   const [apiResults, webSources] = await Promise.allSettled([
@@ -102,7 +217,7 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
       api.getStandings(leagueId, season),
       api.getInjuries(fixtureId),
     ]).then((results) => results.map((r) => (r.status === 'fulfilled' ? r.value : null))),
-    scraper.enrichFixture(homeTeam.name, awayTeam.name, date, fpredList, forebetList, oddsapiList),
+    scraper.enrichFixture(homeTeam.name, awayTeam.name, date, fpredList, forebetList, oddsapiList, minor),
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : null)));
 
   const [homeFixtures, awayFixtures, h2hFixtures, standingsData, injuriesData] = apiResults || [null, null, null, null, null];
@@ -112,15 +227,17 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
   let formAway = analyzeForm(awayFixtures, awayTeam.id);
 
   // Soccerway comme fallback : si l'API n'a pas fourni de données de forme
-  // (quota épuisé ou équipe non documentée), on essaie le scraper web
-  if (formHome.score === 50 && (!homeFixtures || homeFixtures.length === 0)) {
-    const swHome = await soccerway.getTeamForm(homeTeam.name).catch(() => null);
-    if (swHome) formHome = swHome;
-  }
-  if (formAway.score === 50 && (!awayFixtures || awayFixtures.length === 0)) {
-    const swAway = await soccerway.getTeamForm(awayTeam.name).catch(() => null);
-    if (swAway) formAway = swAway;
-  }
+  // (quota épuisé ou équipe non documentée), on essaie le scraper web — en parallèle pour
+  // les deux équipes plutôt qu'enchaîné, ça divise par deux ce fallback (souvent le plus lent).
+  // Sauté pour les ligues mineures, où il aboutit presque toujours à rien d'exploitable.
+  const needsSwHome = !minor && formHome.score === 50 && (!homeFixtures || homeFixtures.length === 0);
+  const needsSwAway = !minor && formAway.score === 50 && (!awayFixtures || awayFixtures.length === 0);
+  const [swHome, swAway] = await Promise.all([
+    needsSwHome ? soccerway.getTeamForm(homeTeam.name).catch(() => null) : null,
+    needsSwAway ? soccerway.getTeamForm(awayTeam.name).catch(() => null) : null,
+  ]);
+  if (swHome) formHome = swHome;
+  if (swAway) formAway = swAway;
   const h2h = analyzeH2H(h2hFixtures, homeTeam.id, awayTeam.id);
   const standings = analyzeStandings(standingsData, homeTeam.id, awayTeam.id);
   const injuries = analyzeInjuries(injuriesData, homeTeam.id, awayTeam.id);
@@ -159,6 +276,10 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
   const finalProbs = scraper.blendProbabilities(algoProbs, web, !noApiData);
   const recommendation = getRecommendation(finalProbs, homeScore, awayScore, web, insufficientData);
   const goalPrediction = calcGoalPrediction(formHome, formAway);
+  const matchState = matchStateFor(fixture.fixture.status.short, fixture.fixture.date);
+  const validation = matchState === 'finished'
+    ? computeValidation(recommendation.pick, fixture.goals?.home, fixture.goals?.away, goalPrediction)
+    : null;
 
   return {
     fixture: {
@@ -170,6 +291,8 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
       homeLogo: homeTeam.logo,
       awayLogo: awayTeam.logo,
     },
+    matchState,
+    validation,
     scores: {
       home: Math.round(homeScore),
       away: Math.round(awayScore),
@@ -208,17 +331,22 @@ async function analyzeDayFixtures(date) {
   ]);
 
   const upcoming = fixtures.filter((f) => UPCOMING_STATUSES.includes(f.fixture.status.short));
+  const finished = fixtures
+    .filter((f) => FINISHED_STATUSES.includes(f.fixture.status.short))
+    .map(buildFinishedEntry);
 
   const apiLimited = api.getDailyRequestCount() >= api.DAILY_LIMIT;
 
   // Quota épuisé + fixtures en cache → mode web avec métadonnées API (logos, heures)
   if (apiLimited && upcoming.length > 0) {
-    return analyzeWebDayWithFixtures(upcoming, fpredList, forebetList, oddsapiList);
+    const webResult = await analyzeWebDayWithFixtures(upcoming, fpredList, forebetList, oddsapiList);
+    return { ...webResult, results: [...webResult.results, ...finished] };
   }
 
   // Quota épuisé + pas de fixtures en cache → mode web pur (matchs depuis fpred/forebet)
   if (apiLimited && upcoming.length === 0) {
-    return analyzeWebDay(fpredList, oddsapiList);
+    const webResult = await analyzeWebDay(fpredList, oddsapiList);
+    return { ...webResult, results: [...webResult.results, ...finished] };
   }
 
   // Trier les matchs à analyser en priorité : les rencontres "suivies" (cotes bookmaker,
@@ -228,6 +356,8 @@ async function analyzeDayFixtures(date) {
   // (ex : amicaux de sélections nationales avant une Coupe du Monde)
   function fixtureRank(f) {
     let score = 0;
+    // Coupe du Monde et grands championnats : priorité forte, ce sont les pronostics les plus fiables
+    if (isPriorityLeague(f)) score += 10;
     if (oddsapi.findMatch(oddsapiList, f.teams.home.name, f.teams.away.name)) score += 2;
     if (footballpred.isInFpred(fpredList, f.teams.home.name, f.teams.away.name)) score += 1;
     if (isLikelyMinor(f)) score -= 3;
@@ -238,13 +368,13 @@ async function analyzeDayFixtures(date) {
 
   const toAnalyze = upcoming.slice(0, MAX_FIXTURES_PER_DAY);
 
-  const results = [];
-  for (const fixture of toAnalyze) {
+  // Les matchs sont indépendants entre eux -> on les analyse en parallèle (limité, pour ne
+  // pas saturer le navigateur Puppeteer partagé ni les sites scrapés) au lieu d'un par un
+  const results = await mapWithConcurrency(toAnalyze, ANALYSIS_CONCURRENCY, async (fixture) => {
     try {
-      const analysis = await analyzeFixture(fixture, fpredList, forebetList, oddsapiList);
-      results.push(analysis);
+      return await analyzeFixture(fixture, fpredList, forebetList, oddsapiList);
     } catch (err) {
-      results.push({
+      return {
         fixture: {
           id: fixture.fixture.id,
           date: fixture.fixture.date,
@@ -252,10 +382,11 @@ async function analyzeDayFixtures(date) {
           home: fixture.teams.home.name,
           away: fixture.teams.away.name,
         },
+        matchState: matchStateFor(fixture.fixture.status.short, fixture.fixture.date),
         error: err.message,
-      });
+      };
     }
-  }
+  });
 
   results.sort((a, b) => {
     if (a.error) return 1;
@@ -267,7 +398,7 @@ async function analyzeDayFixtures(date) {
     return maxB - maxA;
   });
 
-  return { results, total: upcoming.length, analyzed: toAnalyze.length };
+  return { results: [...results, ...finished], total: upcoming.length, analyzed: toAnalyze.length };
 }
 
 function fixtureMatchesQuery(fixture, terms) {
@@ -294,12 +425,11 @@ async function searchFixtures(date, query) {
     oddsapi.getTodayOdds(),
   ]);
 
-  const results = [];
-  for (const fixture of matched) {
+  const results = await mapWithConcurrency(matched, ANALYSIS_CONCURRENCY, async (fixture) => {
     try {
-      results.push(await analyzeFixture(fixture, fpredList, forebetList, oddsapiList));
+      return await analyzeFixture(fixture, fpredList, forebetList, oddsapiList);
     } catch (err) {
-      results.push({
+      return {
         fixture: {
           id: fixture.fixture.id,
           date: fixture.fixture.date,
@@ -307,10 +437,11 @@ async function searchFixtures(date, query) {
           home: fixture.teams.home.name,
           away: fixture.teams.away.name,
         },
+        matchState: matchStateFor(fixture.fixture.status.short, fixture.fixture.date),
         error: err.message,
-      });
+      };
     }
-  }
+  });
 
   return { results, total: upcoming.length };
 }

@@ -47,9 +47,39 @@ header h1 { font-size: 1.4rem; }
   color: var(--muted);
 }
 
+.api-status { display: flex; align-items: center; gap: 0.5rem; }
 .api-status span.ok { background: rgba(63,185,80,0.15); color: var(--green); }
 .api-status span.warn { background: rgba(210,153,34,0.15); color: var(--yellow); }
 .api-status span.danger { background: rgba(248,81,73,0.15); color: var(--red); }
+
+#account-status a { color: var(--blue); text-decoration: none; }
+#account-status .plan-free { background: var(--border); color: var(--muted); }
+#account-status .plan-premium { background: rgba(88,166,255,0.15); color: var(--blue); }
+#account-status .plan-vip { background: rgba(188,140,255,0.15); color: var(--purple); }
+#account-status .plan-admin { background: rgba(210,153,34,0.15); color: var(--yellow); }
+#dashboard-link { margin-left: 0.25rem; }
+
+.sport-tabs {
+  max-width: 1100px;
+  margin: 0.75rem auto 0;
+  display: flex;
+  gap: 0.5rem;
+}
+
+.sport-tab {
+  background: var(--border);
+  color: var(--muted);
+  border: none;
+  border-radius: 8px;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.sport-tab.active {
+  background: var(--blue);
+  color: #fff;
+}
 
 main {
   max-width: 1100px;
@@ -178,10 +208,34 @@ main {
 }
 
 #predictions-grid {
+  display: block;
+}
+
+.grid-section {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 1rem;
+  margin-bottom: 1.5rem;
 }
+
+.section-title {
+  font-size: 1rem;
+  color: var(--muted);
+  margin: 1rem 0 0.75rem;
+}
+
+.finished-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.2rem;
+  opacity: 0.75;
+  cursor: pointer;
+}
+
+.finished-card:hover { opacity: 1; border-color: var(--blue); }
+
+.finished-card .card-teams { margin-bottom: 0.5rem; }
 
 .card {
   background: var(--card);
@@ -404,7 +458,69 @@ main {
 .injury-reason.suspended { color: var(--red); }
 .injury-reason.injured { color: var(--yellow); }
 
+.combo-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+
+.combo-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+.combo-sport-label { font-size: 0.85rem; font-weight: 700; margin-bottom: 0.6rem; }
+
+.combo-match {
+  background: rgba(255,255,255,0.03);
+  border-radius: 8px;
+  padding: 0.6rem 0.7rem;
+}
+
+.combo-match-league { font-size: 0.68rem; color: var(--muted); margin-bottom: 0.2rem; }
+.combo-match-teams { font-size: 0.85rem; font-weight: 600; }
+.combo-match-pick { font-size: 0.78rem; color: var(--green); margin-top: 0.3rem; }
+.combo-match-prob { color: var(--text); font-weight: 700; }
+
+.combo-plus { text-align: center; font-size: 0.9rem; color: var(--muted); margin: 0.4rem 0; }
+
+.combo-summary {
+  margin-top: 0.7rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.8rem;
+}
+
+.combo-combined-prob { font-weight: 700; }
+
+.combo-match.is-validated { border: 1px solid var(--green); }
+.combo-match.is-failed { border: 1px solid var(--red); opacity: 0.75; }
+
+.combo-match-status {
+  display: inline-block;
+  margin-top: 0.4rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+}
+.combo-match-status.pending { color: var(--muted); }
+.combo-match-status.validated { color: var(--green); }
+.combo-match-status.failed { color: var(--red); }
+
+.combo-progress {
+  margin-top: 0.5rem;
+  text-align: center;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.combo-card.combo-won { border-color: var(--green); }
+.combo-card.combo-won .combo-progress { color: var(--green); }
+.combo-card.combo-lost { border-color: var(--red); opacity: 0.85; }
+.combo-card.combo-lost .combo-progress { color: var(--red); }
+
 @media (max-width: 600px) {
-  #predictions-grid { grid-template-columns: 1fr; }
+  .grid-section { grid-template-columns: 1fr; }
   .grid-2 { grid-template-columns: 1fr; }
 }

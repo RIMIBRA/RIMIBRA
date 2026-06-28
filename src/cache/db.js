@@ -31,14 +31,21 @@ function set(key, data, ttlSeconds) {
   writeJson(CACHE_FILE, store);
 }
 
-function logRequest(endpoint) {
-  const log = readJson(LOG_FILE, []);
-  log.push({ endpoint, created_at: Date.now() });
-  writeJson(LOG_FILE, log);
+// namespace vide = football (fichier d'origine, pour ne pas casser l'historique existant) ;
+// chaque sport a son propre quota API (100/jour chacun), donc un fichier de log séparé
+function logFileFor(namespace) {
+  return namespace ? path.join(__dirname, `../../cache-requests-${namespace}.json`) : LOG_FILE;
 }
 
-function getDailyRequestCount() {
-  const log = readJson(LOG_FILE, []);
+function logRequest(endpoint, namespace = '') {
+  const file = logFileFor(namespace);
+  const log = readJson(file, []);
+  log.push({ endpoint, created_at: Date.now() });
+  writeJson(file, log);
+}
+
+function getDailyRequestCount(namespace = '') {
+  const log = readJson(logFileFor(namespace), []);
   const startOfDay = new Date();
   startOfDay.setHours(0, 0, 0, 0);
   return log.filter((entry) => entry.created_at >= startOfDay.getTime()).length;

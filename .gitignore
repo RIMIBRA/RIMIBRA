@@ -4,3 +4,4 @@ node_modules/
 *.sqlite
 cache-data.json
 cache-requests.json
+cache-requests-*.json

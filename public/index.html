@@ -9,16 +9,29 @@
 <body>
   <header>
     <div class="header-inner">
-      <h1>⚽ Football Predictor</h1>
+      <h1 id="app-title">⚽ Football Predictor</h1>
       <div class="api-status">
         <span id="api-badge">Chargement...</span>
+        <span id="account-status"></span>
       </div>
+    </div>
+    <div class="sport-tabs" id="sport-tabs">
+      <button class="sport-tab active" data-sport="football">⚽ Football</button>
+      <button class="sport-tab" data-sport="nfl">🏈 NFL</button>
+      <button class="sport-tab" data-sport="nba">🏀 Basketball</button>
+      <button class="sport-tab" data-sport="hockey">🏒 Hockey</button>
+      <button class="sport-tab" data-sport="baseball">⚾ Baseball</button>
+      <button class="sport-tab" data-sport="handball">🤾 Handball</button>
+      <button class="sport-tab" data-sport="tennis">🎾 Tennis</button>
+      <button class="sport-tab" data-sport="combos">🎯 Combinés</button>
     </div>
   </header>
 
   <main>
     <div class="controls">
+      <button id="btn-day-prev" class="hidden" title="Jour précédent">◀</button>
       <input type="date" id="date-picker" />
+      <button id="btn-day-next" class="hidden" title="Jour suivant">▶</button>
       <button id="btn-load">Analyser</button>
       <input type="text" id="search-input" placeholder="🔍 Rechercher une équipe (ex: Brésil, Maroc, Pays-Bas...)" />
       <button id="btn-search">Rechercher</button>
@@ -32,6 +45,14 @@
     </div>
 
     <div id="error-box" class="hidden"></div>
+
+    <div class="top-filters hidden" id="state-filters">
+      <span class="filter-label">Statut :</span>
+      <button class="filter-btn active" data-state="all">Tous</button>
+      <button class="filter-btn" data-state="upcoming">⏳ À venir</button>
+      <button class="filter-btn" data-state="live">🔴 En cours</button>
+      <button class="filter-btn" data-state="finished">✅ Terminés</button>
+    </div>
 
     <div class="top-filters hidden" id="top-filters">
       <span class="filter-label">Afficher :</span>
@@ -53,6 +74,7 @@
     </div>
   </div>
 
+  <script src="/js/auth.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>

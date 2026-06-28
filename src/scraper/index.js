@@ -5,7 +5,9 @@ const oddsapi = require('./oddsapi');
 const flashscore = require('./flashscore');
 
 // Lists are passed from analyzeDayFixtures to avoid re-fetching per fixture
-async function enrichFixture(homeTeam, awayTeam, date, fpredList = null, forebetList = null, oddsapiList = null) {
+// skipFlashscore : pour les ligues clairement mineures, ce fallback Puppeteer (~5-8s) trouve
+// très rarement quelque chose d'exploitable — pas la peine de payer le coût en temps
+async function enrichFixture(homeTeam, awayTeam, date, fpredList = null, forebetList = null, oddsapiList = null, skipFlashscore = false) {
   const fpredSource = fpredList || await footballpred.getTodayPredictions(date);
   const forebetSource = forebetList || await forebet.getTodayPredictions(date);
   const oddsSource = oddsapiList || await oddsapi.getTodayOdds();
@@ -14,11 +16,12 @@ async function enrichFixture(homeTeam, awayTeam, date, fpredList = null, forebet
   const forebetMatch = forebet.findPrediction(forebetSource, homeTeam, awayTeam);
   const oddsMatch = oddsapi.findMatch(oddsSource, homeTeam, awayTeam);
 
-  // Scraping en parallèle — les deux peuvent échouer sans bloquer l'analyse
+  // Scraping en parallèle — les deux peuvent échouer sans bloquer l'analyse.
+  // Pour une ligue mineure : besoccer trouve presque toujours un faux négatif (~2-4s perdues),
+  // et flashscore (Puppeteer, ~5-8s) seulement si oddsapi n'a pas déjà les cotes.
   const [bscData, fsData] = await Promise.allSettled([
-    besoccer.getMatchData(homeTeam, awayTeam),
-    // Flashscore : seulement si oddsapi n'a pas trouvé de cotes pour ce match
-    oddsMatch ? Promise.resolve(null) : flashscore.getMatchOdds(homeTeam, awayTeam),
+    skipFlashscore ? Promise.resolve(null) : besoccer.getMatchData(homeTeam, awayTeam),
+    (oddsMatch || skipFlashscore) ? Promise.resolve(null) : flashscore.getMatchOdds(homeTeam, awayTeam),
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : null)));
 
   return {
