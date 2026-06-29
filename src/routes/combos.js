@@ -232,6 +232,15 @@ function scheduleDailyPrewarm() {
   }, msUntilNext3am());
 }
 
-scheduleDailyPrewarm();
+// Jest met NODE_ENV=test automatiquement — on évite d'armer un setInterval qui ne se
+// termine jamais et empêche le process de test de quitter proprement.
+if (process.env.NODE_ENV !== 'test') {
+  scheduleDailyPrewarm();
+}
 
 module.exports = router;
+module.exports.pickProbability = pickProbability;
+module.exports.isComboCandidate = isComboCandidate;
+module.exports.buildComboMatches = buildComboMatches;
+module.exports.summarize = summarize;
+module.exports.addDays = addDays;

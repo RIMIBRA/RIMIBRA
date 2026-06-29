@@ -7,7 +7,8 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "cli": "node cli.js",
-    "migrate": "node src/db/migrate.js"
+    "migrate": "node src/db/migrate.js",
+    "test": "jest"
   },
   "dependencies": {
     "axios": "^1.6.0",
@@ -26,6 +27,7 @@
     "puppeteer-extra-plugin-stealth": "^2.11.2"
   },
   "devDependencies": {
+    "jest": "^30.4.2",
     "nodemon": "^3.0.2"
   }
 }

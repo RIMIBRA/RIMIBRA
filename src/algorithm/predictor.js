@@ -463,4 +463,11 @@ async function searchFixtures(date, query) {
   return { results, total: upcoming.length };
 }
 
-module.exports = { analyzeFixture, analyzeDayFixtures, searchFixtures };
+module.exports = {
+  analyzeFixture,
+  analyzeDayFixtures,
+  searchFixtures,
+  matchStateFor,
+  computeValidation,
+  isLikelyMinor,
+};
