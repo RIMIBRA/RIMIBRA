@@ -6,8 +6,12 @@ const oddsapi = require('../scraper/oddsapi');
 const { requireFeature, requireAdmin } = require('../auth/middleware');
 const { isFreePreviewMatch } = require('../auth/tiers');
 
-// Seuil au-delà duquel le pari "vainqueur sec" est jugé trop évident (cote proche de 1.0)
+// OBVIOUS_PICK_THRESHOLD : filtre bon marché pour éviter de consommer le quota odds-api sur un
+// match où notre algo n'est pas confiant — pas le critère final. La décision d'afficher
+// l'alternative dépend ensuite de la VRAIE cote bookmaker (OBVIOUS_ODD_MAX) : un algo sûr à 83%
+// sur un match où le marché donne une cote de 2.71 n'est pas "trop évident", juste optimiste.
 const OBVIOUS_PICK_THRESHOLD = 80;
+const OBVIOUS_ODD_MAX = 1.6;
 const ALTERNATIVE_ODD_MIN = 1.3;
 const ALTERNATIVE_ODD_MAX = 6;
 
@@ -35,12 +39,13 @@ async function buildAlternativeBet(fixture, analysis) {
     const oddsList = await oddsapi.getTodayOdds();
     const match = oddsapi.findMatch(oddsList, fixture.teams.home.name, fixture.teams.away.name);
     if (!match) return null;
-    const totals = await oddsapi.getMatchTotals(match.id, match.leagueKey);
-    const alternative = pickAlternativeFromTotals(totals);
-    if (!alternative) return null;
     const mainPickOdd = analysis.recommendation.pick.startsWith('1') ? match.rawOdds.home
       : analysis.recommendation.pick.startsWith('2') ? match.rawOdds.away
       : match.rawOdds.draw;
+    if (mainPickOdd == null || mainPickOdd > OBVIOUS_ODD_MAX) return null; // le marché ne juge pas ce pick "évident" -> pas d'alternative à proposer
+    const totals = await oddsapi.getMatchTotals(match.id, match.leagueKey);
+    const alternative = pickAlternativeFromTotals(totals);
+    if (!alternative) return null;
     return { mainPickOdd, alternative };
   } catch {
     return null;

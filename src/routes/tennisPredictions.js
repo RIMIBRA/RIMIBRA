@@ -4,9 +4,12 @@ const api = require('../api/tennisClient');
 const predictor = require('../algorithm/tennisPredictor');
 const { requireAdmin } = require('../auth/middleware');
 
-// Seuil au-delà duquel le pari "vainqueur sec" est jugé trop évident (cote proche de 1.0,
-// peu d'intérêt) pour qu'on aille chercher une alternative plus équilibrée dans les cotes réelles
+// OBVIOUS_PICK_THRESHOLD : filtre bon marché pour éviter de consommer le quota API sur un match
+// où notre algo n'est pas confiant — pas le critère final. La décision d'afficher l'alternative
+// dépend ensuite de la VRAIE cote bookmaker (OBVIOUS_ODD_MAX) : un algo sûr à 83% sur un match où
+// le marché donne une cote de 2.71 n'est pas "trop évident", juste optimiste.
 const OBVIOUS_PICK_THRESHOLD = 80;
+const OBVIOUS_ODD_MAX = 1.6;
 
 function pickProbability(p) {
   return p.recommendation.pick.startsWith('1') ? p.probabilities.home : p.probabilities.away;
@@ -54,6 +57,7 @@ async function buildAlternativeBet(matchId, analysis) {
     const odds = await api.getOdds(matchId);
     if (!odds) return null;
     const winOdd = averageOdd(odds['Home/Away']?.[analysis.recommendation.pick.startsWith('1') ? 'Home' : 'Away'] || {});
+    if (winOdd == null || winOdd > OBVIOUS_ODD_MAX) return null; // le marché ne juge pas ce pick "évident" -> pas d'alternative à proposer
     const alternative = findBalancedAlternative(odds);
     if (!alternative) return null;
     return { mainPickOdd: winOdd, alternative };
