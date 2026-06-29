@@ -2,8 +2,50 @@ const express = require('express');
 const router = express.Router();
 const { analyzeDayFixtures, analyzeFixture, searchFixtures } = require('../algorithm/predictor');
 const api = require('../api/client');
+const oddsapi = require('../scraper/oddsapi');
 const { requireFeature, requireAdmin } = require('../auth/middleware');
 const { isFreePreviewMatch } = require('../auth/tiers');
+
+// Seuil au-delà duquel le pari "vainqueur sec" est jugé trop évident (cote proche de 1.0)
+const OBVIOUS_PICK_THRESHOLD = 80;
+const ALTERNATIVE_ODD_MIN = 1.3;
+const ALTERNATIVE_ODD_MAX = 6;
+
+function pickProbability(p) {
+  if (p.recommendation.pick.startsWith('1')) return p.probabilities.home;
+  if (p.recommendation.pick.startsWith('2')) return p.probabilities.away;
+  return p.probabilities.draw;
+}
+
+function pickAlternativeFromTotals(totals) {
+  if (!totals) return null;
+  const candidates = totals
+    .filter((o) => o.price >= ALTERNATIVE_ODD_MIN && o.price <= ALTERNATIVE_ODD_MAX)
+    .map((o) => ({ market: `${o.name === 'Over' ? 'Plus' : 'Moins'} de ${o.point} buts`, odd: o.price }));
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => b.odd - a.odd);
+  return candidates[0];
+}
+
+// Coûte 1 requête the-odds-api supplémentaire — appelé uniquement ici (détail d'un match
+// précis), jamais pour la liste du jour entière, pour ne pas exploser le quota mensuel.
+async function buildAlternativeBet(fixture, analysis) {
+  if (analysis.matchState === 'finished' || pickProbability(analysis) < OBVIOUS_PICK_THRESHOLD) return null;
+  try {
+    const oddsList = await oddsapi.getTodayOdds();
+    const match = oddsapi.findMatch(oddsList, fixture.teams.home.name, fixture.teams.away.name);
+    if (!match) return null;
+    const totals = await oddsapi.getMatchTotals(match.id, match.leagueKey);
+    const alternative = pickAlternativeFromTotals(totals);
+    if (!alternative) return null;
+    const mainPickOdd = analysis.recommendation.pick.startsWith('1') ? match.rawOdds.home
+      : analysis.recommendation.pick.startsWith('2') ? match.rawOdds.away
+      : match.rawOdds.draw;
+    return { mainPickOdd, alternative };
+  } catch {
+    return null;
+  }
+}
 
 router.get('/today', async (req, res) => {
   try {
@@ -56,7 +98,8 @@ router.get('/fixture/:id', async (req, res) => {
     const fixture = await api.getFixtureById(req.params.id);
     if (!fixture) return res.status(404).json({ error: 'Match introuvable' });
     const analysis = await analyzeFixture(fixture);
-    res.json(analysis);
+    const alternativeBet = await buildAlternativeBet(fixture, analysis);
+    res.json({ ...analysis, alternativeBet });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

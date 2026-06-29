@@ -473,6 +473,12 @@ main {
   background: rgba(255,255,255,0.03);
   border-radius: 8px;
   padding: 0.6rem 0.7rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.combo-match:hover {
+  background: rgba(255,255,255,0.07);
 }
 
 .combo-match-league { font-size: 0.68rem; color: var(--muted); margin-bottom: 0.2rem; }

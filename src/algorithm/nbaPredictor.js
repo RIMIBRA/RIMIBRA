@@ -3,6 +3,8 @@ const { analyzeForm } = require('./form');
 const { analyzeH2H } = require('./h2h');
 const { normalize, expandSearchTerms } = require('./teamAliases');
 const { mapWithConcurrency } = require('../utils/concurrency');
+const cache = require('../cache/db');
+const FULL_ANALYSIS_TTL = 12 * 60; // 12 min : bon compromis vitesse/fraîcheur des statuts en direct
 
 const HOME_ADVANTAGE = 5;
 const MAX_GAMES_PER_DAY = 16;
@@ -137,6 +139,15 @@ async function analyzeGame(game) {
 }
 
 async function analyzeDayGames(date) {
+  const cacheKey = `fullDayAnalysis_nba_${date}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+  const result = await analyzeDayGamesUncached(date);
+  cache.set(cacheKey, result, FULL_ANALYSIS_TTL);
+  return result;
+}
+
+async function analyzeDayGamesUncached(date) {
   const games = await api.getGamesByDate(date);
   const upcoming = games.filter((f) => UPCOMING_STATUSES.includes(f.fixture.status.short));
   const finished = games.filter((f) => FINISHED_STATUSES.includes(f.fixture.status.short)).map(buildFinishedEntry);

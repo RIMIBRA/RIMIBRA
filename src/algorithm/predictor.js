@@ -12,6 +12,12 @@ const oddsapi = require('../scraper/oddsapi');
 const soccerway = require('../scraper/soccerway');
 const { normalize, expandSearchTerms } = require('./teamAliases');
 const { mapWithConcurrency } = require('../utils/concurrency');
+const cache = require('../cache/db');
+
+// L'analyse complète d'une journée (jusqu'à 200s) est mise en cache 2 minutes : le premier
+// visiteur paie le coût une fois, tous les suivants dans cette fenêtre ont une réponse quasi
+// instantanée — plus efficace que les caches par sous-requête (forme/H2H...) déjà en place.
+const FULL_ANALYSIS_TTL = 12 * 60; // 12 min : bon compromis vitesse/fraîcheur des statuts en direct
 
 const HOME_ADVANTAGE = 6;
 const MAX_FIXTURES_PER_DAY = 30;
@@ -322,14 +328,25 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
 }
 
 async function analyzeDayFixtures(date) {
-  // Charger fixtures API + sources web en parallèle (oddsapi = gratuit, pas de quota)
+  const cacheKey = `fullDayAnalysis_football_${date}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const result = await analyzeDayFixturesUncached(date);
+  cache.set(cacheKey, result, FULL_ANALYSIS_TTL);
+  return result;
+}
+
+async function analyzeDayFixturesUncached(date) {
+  // Charger fixtures API + sources web en parallèle (oddsapi = gratuit, pas de quota).
+  // allSettled : une panne réseau ponctuelle sur un scraper (footballpred/forebet/oddsapi)
+  // ne doit pas faire échouer toute l'analyse du jour — seule l'API foot est indispensable.
   const [fixtures, fpredList, forebetList, oddsapiList] = await Promise.all([
     api.getFixturesByDate(date),
-    footballpred.getTodayPredictions(date),
-    forebet.getTodayPredictions(date),
-    oddsapi.getTodayOdds(),
+    footballpred.getTodayPredictions(date).catch(() => []),
+    forebet.getTodayPredictions(date).catch(() => []),
+    oddsapi.getTodayOdds().catch(() => []),
   ]);
-
   const upcoming = fixtures.filter((f) => UPCOMING_STATUSES.includes(f.fixture.status.short));
   const finished = fixtures
     .filter((f) => FINISHED_STATUSES.includes(f.fixture.status.short))

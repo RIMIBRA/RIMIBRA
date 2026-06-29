@@ -2,8 +2,10 @@ const { analyzeForm } = require('./form');
 const { analyzeH2H } = require('./h2h');
 const { normalize, expandSearchTerms } = require('./teamAliases');
 const { mapWithConcurrency } = require('../utils/concurrency');
+const cache = require('../cache/db');
 
 const ANALYSIS_CONCURRENCY = 10;
+const FULL_ANALYSIS_TTL = 12 * 60; // 12 min : bon compromis vitesse/fraîcheur des statuts en direct
 
 // Usine générique pour les sports d'équipe sans classement/blessures exploitables encore
 // (forme + H2H uniquement) — réutilisée par Hockey, Baseball, Handball, Tennis.
@@ -165,6 +167,15 @@ function createTeamSportPredictor({
   }
 
   async function analyzeDayGames(date) {
+    const cacheKey = `fullDayAnalysis_${leagueLabel.toLowerCase()}_${date}`;
+    const cached = cache.get(cacheKey);
+    if (cached) return cached;
+    const result = await analyzeDayGamesUncached(date);
+    cache.set(cacheKey, result, FULL_ANALYSIS_TTL);
+    return result;
+  }
+
+  async function analyzeDayGamesUncached(date) {
     const games = await api.getGamesByDate(date);
     const upcoming = games.filter((f) => upcomingStatuses.includes(f.fixture.status.short));
     const finished = games.filter((f) => f.fixture.status.short === 'FT').map(finishedEntry);

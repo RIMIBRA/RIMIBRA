@@ -104,6 +104,7 @@ async function getTodayOdds() {
 
         results.push({
           id: match.id,
+          leagueKey: league, // ex: 'soccer_epl' — nécessaire pour récupérer le marché "totals" à la demande
           home: match.home_team,
           away: match.away_team,
           league: match.sport_title,
@@ -123,6 +124,44 @@ async function getTodayOdds() {
   return results;
 }
 
+// Coûte 1 requête (en plus du quota déjà utilisé pour h2h) — appelé uniquement à la demande
+// (détail d'un match précis) et caché longtemps, jamais pour la liste complète du jour, car
+// the-odds-api facture chaque marché séparément (vérifié : h2h+totals = 2 requêtes, pas 1)
+async function getMatchTotals(eventId, leagueKey) {
+  if (!process.env.THE_ODDS_API_KEY || !eventId || !leagueKey) return null;
+
+  // Note : le cache ne distingue pas "jamais demandé" de "demandé mais resté vide" (les deux
+  // renvoient null) — un échec répété refera donc l'appel plutôt que d'économiser du quota,
+  // mais ça reste rare (1 appel par match consulté, pas par la liste du jour entière).
+  const cacheKey = `oddsapi_totals_${eventId}`;
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const { data } = await axios.get(`${BASE}/sports/${leagueKey}/events/${eventId}/odds`, {
+      params: {
+        apiKey: process.env.THE_ODDS_API_KEY,
+        regions: 'eu',
+        markets: 'totals',
+        dateFormat: 'iso',
+        oddsFormat: 'decimal',
+      },
+      timeout: 10000,
+    });
+
+    const bookmaker = data.bookmakers?.find((b) =>
+      ['unibet', 'pinnacle', 'bet365', 'williamhill', 'bwin'].includes(b.key)
+    ) || data.bookmakers?.[0];
+    const market = bookmaker?.markets?.find((m) => m.key === 'totals');
+    const result = market?.outcomes?.length > 0 ? market.outcomes : null;
+
+    if (result) cache.set(cacheKey, result, 6 * 3600);
+    return result;
+  } catch {
+    return null;
+  }
+}
+
 function findMatch(list, homeTeam, awayTeam) {
   if (!list || list.length === 0) return null;
   const h = norm(homeTeam);
@@ -135,4 +174,4 @@ function findMatch(list, homeTeam, awayTeam) {
   }) || null;
 }
 
-module.exports = { getTodayOdds, findMatch };
+module.exports = { getTodayOdds, findMatch, getMatchTotals };

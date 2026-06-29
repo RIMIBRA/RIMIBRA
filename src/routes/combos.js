@@ -184,7 +184,7 @@ router.get('/today', async (req, res) => {
         try {
           const series = await getOrCreateComboSeries(sport, date);
           if (series.length === 0) return null;
-          return { sport: sport.label, combos: series };
+          return { sport: sport.label, sportKey: sport.key, combos: series };
         } catch {
           return null;
         }

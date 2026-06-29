@@ -254,6 +254,12 @@ function buildModalContent(p) {
         <div class="value" style="color:var(--blue);font-size:0.95rem">${buildBetAdvice(p).short}</div>
         <div style="font-size:0.75rem;color:var(--muted);margin-top:0.3rem">${buildBetAdvice(p).detail}</div>
       </div>
+      ${p.alternativeBet ? `
+      <div class="stat-box" style="margin-top:0.5rem;border:1px solid var(--yellow)">
+        <div class="label">⚠️ Pari sec trop évident (cote ~${p.alternativeBet.mainPickOdd ?? '1.0'}) — alternative plus équilibrée</div>
+        <div class="value" style="color:var(--yellow);font-size:0.95rem">${p.alternativeBet.alternative.market}</div>
+        <div style="font-size:0.75rem;color:var(--muted);margin-top:0.3rem">Cote moyenne observée chez les bookmakers : ${p.alternativeBet.alternative.odd}</div>
+      </div>` : ''}
       ${p.goalPrediction ? `
       <div class="grid-2" style="margin-top:0.5rem">
         <div class="stat-box">
@@ -488,10 +494,26 @@ async function loadPredictions(date, { force = false } = {}) {
 
 function attachCardClickHandlers(container, predictions) {
   container.querySelectorAll('.card:not(.has-error)').forEach((card) => {
-    card.addEventListener('click', () => {
+    card.addEventListener('click', async () => {
       const id = card.dataset.id;
       const p = predictions.find((x) => String(x.fixture.id) === id);
       if (!p) return;
+
+      // Foot/Tennis : on recharge le match en direct pour récupérer l'alternative de pari
+      // (cotes réelles), pas dans la liste du jour pour ne pas alourdir son chargement
+      if (currentSport === 'tennis' || currentSport === 'football') {
+        modalContent.innerHTML = '<p style="text-align:center;padding:2rem;color:var(--muted)">Chargement…</p>';
+        modal.classList.remove('hidden');
+        try {
+          const res = await fetch(singleMatchEndpoint(id), { headers: authHeaders() });
+          const fresh = await res.json();
+          modalContent.innerHTML = buildModalContent(res.ok ? fresh : p);
+        } catch {
+          modalContent.innerHTML = buildModalContent(p);
+        }
+        return;
+      }
+
       modalContent.innerHTML = buildModalContent(p);
       modal.classList.remove('hidden');
     });
@@ -781,6 +803,7 @@ async function loadCombos(date) {
       </p>` : '';
 
     grid.innerHTML = limitNote + data.groups.map(buildComboGroup).join('');
+    attachComboMatchClickHandlers(grid);
   } catch (err) {
     if (currentSport !== requestSport) return;
     errorBox.textContent = 'Erreur : ' + err.message;
@@ -797,10 +820,10 @@ function comboMatchStatusBadge(m) {
   return '<span class="combo-match-status pending">⚠️ Score non confirmé</span>';
 }
 
-function buildComboMatch(m) {
+function buildComboMatch(m, sportKey) {
   const time = new Date(m.fixture.date).toLocaleString('fr-FR');
   return `
-    <div class="combo-match ${m.finished ? (m.validated ? 'is-validated' : 'is-failed') : ''}">
+    <div class="combo-match ${m.finished ? (m.validated ? 'is-validated' : 'is-failed') : ''}" data-id="${m.fixture.id}" data-sport="${sportKey}">
       <div class="combo-match-league">${m.fixture.league} · ${time}</div>
       <div class="combo-match-teams">${m.fixture.home} vs ${m.fixture.away}</div>
       <div class="combo-match-pick">✓ ${m.pick} <span class="combo-match-prob">${m.probability}%</span></div>
@@ -811,7 +834,7 @@ function buildComboMatch(m) {
 const RISK_EMOJI = { Faible: '🟢', Moyenne: '🟡', Élevée: '🔴' };
 const STATUS_CLASS = { won: 'combo-won', lost: 'combo-lost', active: '' };
 
-function buildComboCard(combo, sequence) {
+function buildComboCard(combo, sequence, sportKey) {
   const progressLabel = combo.status === 'lost'
     ? '❌ Combiné perdu'
     : combo.status === 'won'
@@ -821,7 +844,7 @@ function buildComboCard(combo, sequence) {
   return `
     <div class="combo-card ${STATUS_CLASS[combo.status] || ''}">
       <div class="combo-sport-label">Combiné n°${sequence}${combo.status !== 'active' ? ' · terminé' : ' · en cours'}</div>
-      ${combo.matches.map(buildComboMatch).join('<div class="combo-plus">+</div>')}
+      ${combo.matches.map((m) => buildComboMatch(m, sportKey)).join('<div class="combo-plus">+</div>')}
       <div class="combo-summary">
         <span class="combo-combined-prob">Probabilité combinée : ${combo.combinedProbability}%</span>
         <span class="combo-risk">${RISK_EMOJI[combo.risk] || ''} Risque ${combo.risk}</span>
@@ -831,12 +854,36 @@ function buildComboCard(combo, sequence) {
 }
 
 function buildComboGroup(group) {
-  const cards = group.combos.map((c, i) => buildComboCard(c, i + 1)).reverse().join(''); // le plus récent en premier
+  const cards = group.combos.map((c, i) => buildComboCard(c, i + 1, group.sportKey)).reverse().join(''); // le plus récent en premier
   return `
     <div class="combo-sport-group">
       <h2 class="section-title">${group.sport} (${group.combos.length} combiné${group.combos.length > 1 ? 's' : ''} aujourd'hui)</h2>
       <div class="grid-section combo-grid">${cards}</div>
     </div>`;
+}
+
+function comboMatchEndpoint(sportKey, id) {
+  return sportKey === 'football' ? `${SPORTS[sportKey].base}/fixture/${id}` : `${SPORTS[sportKey].base}/game/${id}`;
+}
+
+function attachComboMatchClickHandlers(container) {
+  container.querySelectorAll('.combo-match').forEach((el) => {
+    el.addEventListener('click', async () => {
+      const id = el.dataset.id;
+      const sportKey = el.dataset.sport;
+      const finished = el.classList.contains('is-validated') || el.classList.contains('is-failed');
+      modalContent.innerHTML = '<p style="text-align:center;padding:2rem;color:var(--muted)">Chargement…</p>';
+      modal.classList.remove('hidden');
+      try {
+        const res = await fetch(comboMatchEndpoint(sportKey, id), { headers: authHeaders() });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Analyse impossible');
+        modalContent.innerHTML = finished ? buildValidationContent(data) : buildModalContent(data);
+      } catch (err) {
+        modalContent.innerHTML = `<p style="color:var(--red)">Erreur : ${err.message}</p>`;
+      }
+    });
+  });
 }
 
 sportTabs.querySelectorAll('.sport-tab').forEach((btn) => {

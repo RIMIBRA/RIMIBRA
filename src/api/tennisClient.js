@@ -116,12 +116,21 @@ async function getGameById(id) {
   return normalized[0] || null;
 }
 
+// Cotes réelles multi-marchés (Home/Away, Over/Under jeux, score exact...) pour un match —
+// utilisé pour proposer une alternative au pari sec quand celui-ci est trop évident (cote ~1.0)
+async function getOdds(matchId) {
+  const data = await apiGet('get_odds', { match_key: matchId });
+  if (!data) return null;
+  return data[String(matchId)] || null;
+}
+
 module.exports = {
   getGamesByDate,
   getTeamLastGames,
   getH2H,
   getRawGames,
   getGameById,
+  getOdds,
   getDailyRequestCount: () => cache.getDailyRequestCount(NAMESPACE),
   DAILY_LIMIT,
 };
