@@ -4,16 +4,11 @@ const api = require('../api/tennisClient');
 const predictor = require('../algorithm/tennisPredictor');
 const { requireAdmin } = require('../auth/middleware');
 
-// OBVIOUS_PICK_THRESHOLD : filtre bon marché pour éviter de consommer le quota API sur un match
-// où notre algo n'est pas confiant — pas le critère final. La décision d'afficher l'alternative
-// dépend ensuite de la VRAIE cote bookmaker (OBVIOUS_ODD_MAX) : un algo sûr à 83% sur un match où
-// le marché donne une cote de 2.71 n'est pas "trop évident", juste optimiste.
-const OBVIOUS_PICK_THRESHOLD = 80;
+// "Trop évident" se juge sur la VRAIE cote bookmaker, jamais sur la confiance de notre propre
+// algo : les deux peuvent diverger fortement (ex. notre modèle à 68% alors que le marché est
+// à une cote de 1.02, quasi certain) — se fier au modèle ferait passer à côté de l'alternative
+// dans exactement le cas où elle est la plus utile.
 const OBVIOUS_ODD_MAX = 1.6;
-
-function pickProbability(p) {
-  return p.recommendation.pick.startsWith('1') ? p.probabilities.home : p.probabilities.away;
-}
 
 function averageOdd(bookmakers) {
   const values = Object.values(bookmakers).map(Number).filter((n) => !Number.isNaN(n));
@@ -52,7 +47,7 @@ function findBalancedAlternative(oddsBySport) {
 }
 
 async function buildAlternativeBet(matchId, analysis) {
-  if (analysis.matchState === 'finished' || pickProbability(analysis) < OBVIOUS_PICK_THRESHOLD) return null;
+  if (analysis.matchState === 'finished') return null;
   try {
     const odds = await api.getOdds(matchId);
     if (!odds) return null;

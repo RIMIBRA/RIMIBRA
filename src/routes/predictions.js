@@ -6,20 +6,13 @@ const oddsapi = require('../scraper/oddsapi');
 const { requireFeature, requireAdmin } = require('../auth/middleware');
 const { isFreePreviewMatch } = require('../auth/tiers');
 
-// OBVIOUS_PICK_THRESHOLD : filtre bon marché pour éviter de consommer le quota odds-api sur un
-// match où notre algo n'est pas confiant — pas le critère final. La décision d'afficher
-// l'alternative dépend ensuite de la VRAIE cote bookmaker (OBVIOUS_ODD_MAX) : un algo sûr à 83%
-// sur un match où le marché donne une cote de 2.71 n'est pas "trop évident", juste optimiste.
-const OBVIOUS_PICK_THRESHOLD = 80;
+// "Trop évident" se juge sur la VRAIE cote bookmaker, jamais sur la confiance de notre propre
+// algo : les deux peuvent diverger fortement (notre modèle peut être à 68% alors que le marché
+// est à une cote de 1.02, quasi certain) — se fier au modèle ferait passer à côté de
+// l'alternative dans exactement le cas où elle est la plus utile.
 const OBVIOUS_ODD_MAX = 1.6;
 const ALTERNATIVE_ODD_MIN = 1.3;
 const ALTERNATIVE_ODD_MAX = 6;
-
-function pickProbability(p) {
-  if (p.recommendation.pick.startsWith('1')) return p.probabilities.home;
-  if (p.recommendation.pick.startsWith('2')) return p.probabilities.away;
-  return p.probabilities.draw;
-}
 
 function pickAlternativeFromTotals(totals) {
   if (!totals) return null;
@@ -34,7 +27,7 @@ function pickAlternativeFromTotals(totals) {
 // Coûte 1 requête the-odds-api supplémentaire — appelé uniquement ici (détail d'un match
 // précis), jamais pour la liste du jour entière, pour ne pas exploser le quota mensuel.
 async function buildAlternativeBet(fixture, analysis) {
-  if (analysis.matchState === 'finished' || pickProbability(analysis) < OBVIOUS_PICK_THRESHOLD) return null;
+  if (analysis.matchState === 'finished') return null;
   try {
     const oddsList = await oddsapi.getTodayOdds();
     const match = oddsapi.findMatch(oddsList, fixture.teams.home.name, fixture.teams.away.name);
