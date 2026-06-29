@@ -1,0 +1,66 @@
+#admin-main {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1.5rem;
+}
+
+#admin-main section { margin-bottom: 2rem; }
+#admin-main h2 { font-size: 1.05rem; margin-bottom: 0.75rem; color: var(--text); }
+
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+
+.stat-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem;
+  text-align: center;
+}
+
+.stat-card-label { font-size: 0.8rem; color: var(--muted); }
+.stat-card-value { font-size: 1.6rem; font-weight: 700; margin-top: 0.25rem; }
+
+.sport-quota {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.sport-quota-name { font-size: 0.85rem; text-transform: capitalize; margin-bottom: 0.4rem; }
+
+.quota-row { display: flex; align-items: center; gap: 0.75rem; }
+.quota-label { font-size: 0.78rem; color: var(--muted); width: 90px; }
+.quota-track { flex: 1; height: 8px; background: var(--border); border-radius: 4px; overflow: hidden; }
+.quota-fill { height: 100%; }
+.quota-fill.ok { background: var(--green); }
+.quota-fill.warn { background: var(--yellow); }
+.quota-fill.danger { background: var(--red); }
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.admin-table th, .admin-table td {
+  text-align: left;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.85rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.admin-table th { color: var(--muted); font-weight: 600; }
+
+.plan-tag { padding: 0.15rem 0.5rem; border-radius: 12px; font-size: 0.75rem; }
+.plan-tag.plan-free { background: var(--border); color: var(--muted); }
+.plan-tag.plan-premium { background: rgba(88,166,255,0.15); color: var(--blue); }
+.plan-tag.plan-vip { background: rgba(188,140,255,0.15); color: var(--purple); }
