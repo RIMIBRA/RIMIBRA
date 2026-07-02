@@ -8,7 +8,12 @@
     "dev": "nodemon src/server.js",
     "cli": "node cli.js",
     "migrate": "node src/db/migrate.js",
-    "test": "jest"
+    "test": "jest",
+    "prod:start": "pm2 start ecosystem.config.js",
+    "prod:stop": "pm2 stop ecosystem.config.js",
+    "prod:restart": "pm2 restart ecosystem.config.js",
+    "prod:status": "pm2 status",
+    "prod:logs": "pm2 logs rimibra"
   },
   "dependencies": {
     "axios": "^1.6.0",
@@ -22,6 +27,7 @@
     "helmet": "^8.2.0",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.22.0",
+    "pm2": "^7.0.3",
     "puppeteer": "^22.0.0",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2"
