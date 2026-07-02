@@ -26,6 +26,7 @@ async function apiGet(endpoint, params = {}, ttlOverride = null) {
 
   const used = cache.getDailyRequestCount();
   if (used >= DAILY_LIMIT) {
+    cache.warnOnceIfQuotaReached('football', used, DAILY_LIMIT);
     return []; // Retourner tableau vide plutôt que bloquer toute l'app
   }
 

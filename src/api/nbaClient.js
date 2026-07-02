@@ -21,7 +21,10 @@ async function apiGet(endpoint, params = {}, ttlOverride = null) {
   if (cached) return cached;
 
   const used = cache.getDailyRequestCount(NAMESPACE);
-  if (used >= DAILY_LIMIT) return [];
+  if (used >= DAILY_LIMIT) {
+    cache.warnOnceIfQuotaReached(NAMESPACE, used, DAILY_LIMIT);
+    return [];
+  }
 
   const response = await axios.get(`${BASE_URL}${endpoint}`, {
     headers: { 'x-apisports-key': process.env.API_FOOTBALL_KEY },
