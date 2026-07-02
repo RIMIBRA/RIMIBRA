@@ -3,6 +3,7 @@ const { analyzeH2H } = require('./h2h');
 const { normalize, expandSearchTerms } = require('./teamAliases');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const cache = require('../cache/db');
+const predictionResults = require('../db/predictionResults');
 
 const ANALYSIS_CONCURRENCY = 10;
 const FULL_ANALYSIS_TTL = 12 * 60; // 12 min : bon compromis vitesse/fraîcheur des statuts en direct
@@ -11,6 +12,7 @@ const FULL_ANALYSIS_TTL = 12 * 60; // 12 min : bon compromis vitesse/fraîcheur 
 // (forme + H2H uniquement) — réutilisée par Hockey, Baseball, Handball, Tennis.
 function createTeamSportPredictor({
   api,
+  sport,
   leagueLabel,
   homeAdvantage = 5,
   allowDraw = false,
@@ -105,6 +107,29 @@ function createTeamSportPredictor({
       ? computeValidation(recommendation.pick, game.goals?.home, game.goals?.away)
       : null;
 
+    // Pas de blend pour ces sports (aucune source web) -> le pronostic final EST le pronostic
+    // de l'algo, algoPick/algoProbabilities sont donc identiques à predictedPick/probabilities.
+    if (matchState === 'upcoming' && !insufficientData) {
+      predictionResults
+        .recordPrediction({
+          sport,
+          fixtureId: game.fixture.id,
+          league: `${game.league.name || leagueLabel}${game.league.country ? ' — ' + game.league.country : ''}`,
+          homeTeam: homeTeam.name,
+          awayTeam: awayTeam.name,
+          predictedPick: recommendation.pick,
+          confidence: recommendation.confidence,
+          probabilities: probs,
+          algoPick: recommendation.pick,
+          algoProbabilities: probs,
+          goalPrediction: null,
+          sources: {},
+          noApiData: insufficientData,
+          featured: true,
+        })
+        .catch((err) => console.error(`Échec enregistrement pronostic ${sport} (ignoré):`, err.message));
+    }
+
     return {
       fixture: {
         id: game.fixture.id,
@@ -178,7 +203,16 @@ function createTeamSportPredictor({
   async function analyzeDayGamesUncached(date) {
     const games = await api.getGamesByDate(date);
     const upcoming = games.filter((f) => upcomingStatuses.includes(f.fixture.status.short));
-    const finished = games.filter((f) => f.fixture.status.short === 'FT').map(finishedEntry);
+    const finishedGames = games.filter((f) => f.fixture.status.short === 'FT');
+    const finished = finishedGames.map(finishedEntry);
+
+    for (const g of finishedGames) {
+      if (g.goals?.home != null && g.goals?.away != null) {
+        predictionResults
+          .resolvePrediction(sport, g.fixture.id, g.goals.home, g.goals.away)
+          .catch((err) => console.error(`Échec résolution pronostic ${sport} (ignoré):`, err.message));
+      }
+    }
 
     // Ligues majeures en premier — les pronostics y sont nettement plus fiables (historique
     // riche, vraies données de forme) que sur une compétition obscure peu suivie

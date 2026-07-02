@@ -1,5 +1,7 @@
 const main = document.getElementById('admin-main');
 const PLAN_LABEL = { free: 'Gratuit', premium: 'Premium', vip: 'VIP' };
+const TRACKED_SPORTS = ['football', 'nba', 'nfl', 'hockey', 'baseball', 'handball', 'tennis'];
+const SPORT_LABEL = { football: 'Football', nba: 'NBA', nfl: 'NFL', hockey: 'Hockey', baseball: 'Baseball', handball: 'Handball', tennis: 'Tennis' };
 
 // L'email est fourni par l'utilisateur à l'inscription — jamais de confiance avant
 // affichage, sinon un email du type "><script>...</script>@x.com" s'exécute ici.
@@ -44,27 +46,39 @@ function trackedRow(p) {
     </tr>`;
 }
 
-async function loadTrackedPredictions(extraOnly) {
-  const params = new URLSearchParams({ date: new Date().toISOString().split('T')[0] });
+async function loadTrackedPredictions(extraOnly, sport) {
+  const params = new URLSearchParams({ date: new Date().toISOString().split('T')[0], sport });
   if (extraOnly) params.set('featured', 'false');
   const res = await fetch(`/api/admin/tracked-predictions?${params}`, { headers: authHeaders() });
   if (!res.ok) return { count: 0, predictions: [] };
   return res.json();
 }
 
-async function renderTrackedSection(extraOnly) {
-  const { count, predictions } = await loadTrackedPredictions(extraOnly);
+async function renderTrackedSection(extraOnly, sport) {
+  const { count, predictions } = await loadTrackedPredictions(extraOnly, sport);
   const rows = predictions.length
     ? predictions.map(trackedRow).join('')
     : '<tr><td colspan="7">Aucun pronostic pour ce filtre aujourd\'hui.</td></tr>';
 
+  const sportOptions = TRACKED_SPORTS.map((s) =>
+    `<option value="${s}" ${s === sport ? 'selected' : ''}>${SPORT_LABEL[s]}</option>`
+  ).join('');
+
+  // Seul le foot a un blend (sources web) et un suivi supplémentaire en arrière-plan -> pour
+  // les autres sports, "Algo seul" == pronostic final et le filtre "matchs supplémentaires"
+  // ne renverra jamais rien (featured est toujours true).
   return `
     <section>
       <h2>Pronostics suivis aujourd'hui (${count})</h2>
-      <label style="display:block;margin-bottom:0.75rem;font-size:0.85rem;color:var(--muted)">
-        <input type="checkbox" id="extra-only-toggle" ${extraOnly ? 'checked' : ''}>
-        Afficher uniquement les matchs supplémentaires (suivi arrière-plan, jamais montrés aux visiteurs)
-      </label>
+      <div style="display:flex;align-items:center;gap:1rem;margin-bottom:0.75rem;flex-wrap:wrap">
+        <select id="sport-select" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0.35rem 0.6rem">
+          ${sportOptions}
+        </select>
+        <label style="font-size:0.85rem;color:var(--muted)">
+          <input type="checkbox" id="extra-only-toggle" ${extraOnly ? 'checked' : ''}>
+          Afficher uniquement les matchs supplémentaires (foot uniquement — suivi arrière-plan, jamais montrés aux visiteurs)
+        </label>
+      </div>
       <table class="admin-table">
         <thead><tr><th>Ligue</th><th>Match</th><th>Pronostic</th><th>Algo seul</th><th>Confiance</th><th>Sources</th><th>Statut</th></tr></thead>
         <tbody>${rows}</tbody>
@@ -72,7 +86,7 @@ async function renderTrackedSection(extraOnly) {
     </section>`;
 }
 
-async function loadDashboard(extraOnly = true) {
+async function loadDashboard(extraOnly = true, sport = 'football') {
   const user = await fetchCurrentUser();
   if (!user) {
     main.innerHTML = '<p>Tu dois être connecté. <a href="/login.html">Se connecter</a></p>';
@@ -86,7 +100,7 @@ async function loadDashboard(extraOnly = true) {
   const [statsRes, usersRes, trackedSection] = await Promise.all([
     fetch('/api/admin/stats', { headers: authHeaders() }),
     fetch('/api/admin/users', { headers: authHeaders() }),
-    renderTrackedSection(extraOnly),
+    renderTrackedSection(extraOnly, sport),
   ]);
 
   if (!statsRes.ok || !usersRes.ok) {
@@ -140,7 +154,13 @@ async function loadDashboard(extraOnly = true) {
   `;
 
   document.getElementById('extra-only-toggle')?.addEventListener('change', (e) => {
-    loadDashboard(e.target.checked);
+    loadDashboard(e.target.checked, sport);
+  });
+  document.getElementById('sport-select')?.addEventListener('change', (e) => {
+    // Le filtre "matchs supplémentaires" ne s'applique qu'au foot -> le désactiver en changeant
+    // de sport évite un tableau vide silencieux qui laisserait croire à un bug
+    const newSport = e.target.value;
+    loadDashboard(newSport === 'football' && extraOnly, newSport);
   });
 }
 

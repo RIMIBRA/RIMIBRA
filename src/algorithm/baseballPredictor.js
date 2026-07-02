@@ -6,6 +6,7 @@ const PRIORITY_LEAGUE_IDS = new Set([1, 2, 5]);
 
 module.exports = createTeamSportPredictor({
   api,
+  sport: 'baseball',
   leagueLabel: 'Baseball',
   homeAdvantage: 4,
   allowDraw: false, // toujours décidé, prolongations si besoin
