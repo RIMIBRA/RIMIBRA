@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { requireAdmin } = require('../auth/middleware');
 const { listUsersWithPlan } = require('../db/users');
+const predictionResults = require('../db/predictionResults');
 
 const footballApi = require('../api/client');
 const nflApi = require('../api/nflClient');
@@ -40,6 +41,20 @@ router.get('/stats', async (req, res) => {
       users: { total: users.length, byPlan },
       quotas,
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Justesse des pronostics vs résultats réels — globale, par confiance et par source externe
+// (footballpred/forebet/besoccer/oddsapi/flashscore/soccerway) — pour calibrer les poids de
+// l'algo (calcWeights) et le blend avec les sources externes sur des données plutôt qu'à l'oeil.
+router.get('/prediction-accuracy', async (req, res) => {
+  try {
+    const sport = req.query.sport || 'football';
+    const sinceDays = Math.min(365, Math.max(1, parseInt(req.query.days, 10) || 30));
+    const stats = await predictionResults.getAccuracyStats(sport, sinceDays);
+    res.json(stats);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

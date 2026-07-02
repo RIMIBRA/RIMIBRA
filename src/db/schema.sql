@@ -47,3 +47,36 @@ CREATE TABLE IF NOT EXISTS combos (
 ALTER TABLE combos DROP CONSTRAINT IF EXISTS combos_combo_date_sport_key;
 
 CREATE INDEX IF NOT EXISTS idx_combos_date_sport ON combos(combo_date, sport, created_at);
+
+-- Historique des pronostics vs résultats réels : sert à mesurer (par source, par niveau de
+-- confiance) si les poids de l'algo (form/classement/h2h/blessures) et le blend avec les
+-- sites externes sont réellement fiables, plutôt que de les ajuster à l'aveugle.
+-- Une ligne par match "upcoming" analysé ; complétée (actual_*, correct, resolved_at) une
+-- fois le match terminé, sans avoir besoin de tout ré-analyser.
+CREATE TABLE IF NOT EXISTS prediction_results (
+  id                SERIAL PRIMARY KEY,
+  sport             TEXT NOT NULL DEFAULT 'football',
+  fixture_id        TEXT NOT NULL,
+  league            TEXT,
+  home_team         TEXT,
+  away_team         TEXT,
+  predicted_pick    TEXT NOT NULL,
+  confidence        TEXT,
+  probabilities     JSONB,
+  goal_prediction   JSONB,
+  sources           JSONB NOT NULL DEFAULT '{}',
+  no_api_data       BOOLEAN NOT NULL DEFAULT false,
+  predicted_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  actual_home_score INTEGER,
+  actual_away_score INTEGER,
+  correct           BOOLEAN,
+  btts_correct      BOOLEAN,
+  over25_correct    BOOLEAN,
+  resolved_at       TIMESTAMPTZ,
+  UNIQUE (sport, fixture_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_prediction_results_unresolved
+  ON prediction_results(sport) WHERE resolved_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_prediction_results_predicted_at
+  ON prediction_results(sport, predicted_at);

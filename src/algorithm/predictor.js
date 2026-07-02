@@ -13,6 +13,7 @@ const soccerway = require('../scraper/soccerway');
 const { normalize, expandSearchTerms } = require('./teamAliases');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const cache = require('../cache/db');
+const predictionResults = require('../db/predictionResults');
 
 // L'analyse complète d'une journée (jusqu'à 200s) est mise en cache 2 minutes : le premier
 // visiteur paie le coût une fois, tous les suivants dans cette fenêtre ont une réponse quasi
@@ -287,6 +288,36 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
     ? computeValidation(recommendation.pick, fixture.goals?.home, fixture.goals?.away, goalPrediction)
     : null;
 
+  const webSourceFlags = {
+    footballpred: !!web.footballpred,
+    forebet: !!web.forebet,
+    besoccer: !!web.besoccer,
+    oddsapi: !!web.oddsapi,
+    flashscore: !!web.flashscore,
+    soccerway: formHome.source === 'soccerway' || formAway.source === 'soccerway',
+  };
+
+  // Uniquement les vrais pronostics pris avant le match (pas "Analyse non disponible", pas
+  // en direct) -> sert à mesurer plus tard, via /admin/prediction-accuracy, si les poids de
+  // l'algo et le blend avec les sources externes sont réellement fiables.
+  if (matchState === 'upcoming' && !insufficientData) {
+    predictionResults
+      .recordPrediction({
+        sport: 'football',
+        fixtureId,
+        league: `${fixture.league.name} — ${fixture.league.country}`,
+        homeTeam: homeTeam.name,
+        awayTeam: awayTeam.name,
+        predictedPick: recommendation.pick,
+        confidence: recommendation.confidence,
+        probabilities: finalProbs,
+        goalPrediction,
+        sources: webSourceFlags,
+        noApiData,
+      })
+      .catch((err) => console.error('Échec enregistrement pronostic (ignoré):', err.message));
+  }
+
   return {
     fixture: {
       id: fixtureId,
@@ -309,14 +340,7 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
     noApiData,
     insufficientData,
     webMode: false,
-    webSources: {
-      footballpred: !!web.footballpred,
-      forebet: !!web.forebet,
-      besoccer: !!web.besoccer,
-      oddsapi: !!web.oddsapi,
-      flashscore: !!web.flashscore,
-      soccerway: formHome.source === 'soccerway' || formAway.source === 'soccerway',
-    },
+    webSources: webSourceFlags,
     odds: web.oddsapi?.rawOdds || web.flashscore?.rawOdds || null,
     breakdown: {
       form: { home: formHome, away: formAway },
@@ -348,9 +372,19 @@ async function analyzeDayFixturesUncached(date) {
     oddsapi.getTodayOdds().catch(() => []),
   ]);
   const upcoming = fixtures.filter((f) => UPCOMING_STATUSES.includes(f.fixture.status.short));
-  const finished = fixtures
-    .filter((f) => FINISHED_STATUSES.includes(f.fixture.status.short))
-    .map(buildFinishedEntry);
+  const finishedFixtures = fixtures.filter((f) => FINISHED_STATUSES.includes(f.fixture.status.short));
+  const finished = finishedFixtures.map(buildFinishedEntry);
+
+  // Complète en arrière-plan les pronostics pris quand ces matchs étaient encore "upcoming" —
+  // sans ré-analyser (le score final suffit). Idempotent : resolvePrediction ignore les
+  // matchs déjà résolus ou jamais pronostiqués (hors sélection, quota épuisé ce jour-là...).
+  for (const f of finishedFixtures) {
+    if (f.goals?.home != null && f.goals?.away != null) {
+      predictionResults
+        .resolvePrediction('football', f.fixture.id, f.goals.home, f.goals.away)
+        .catch((err) => console.error('Échec résolution pronostic (ignoré):', err.message));
+    }
+  }
 
   const apiLimited = api.getDailyRequestCount() >= api.DAILY_LIMIT;
 
