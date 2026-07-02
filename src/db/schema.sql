@@ -66,6 +66,9 @@ CREATE TABLE IF NOT EXISTS prediction_results (
   goal_prediction   JSONB,
   sources           JSONB NOT NULL DEFAULT '{}',
   no_api_data       BOOLEAN NOT NULL DEFAULT false,
+  -- false = suivi uniquement en tâche de fond (trackExtraFixturesForData), jamais montré à un
+  -- visiteur (au-delà des MAX_FIXTURES_PER_DAY affichés) -> sert à distinguer les deux dans le dashboard
+  featured          BOOLEAN NOT NULL DEFAULT true,
   predicted_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
   actual_home_score INTEGER,
   actual_away_score INTEGER,
@@ -75,6 +78,9 @@ CREATE TABLE IF NOT EXISTS prediction_results (
   resolved_at       TIMESTAMPTZ,
   UNIQUE (sport, fixture_id)
 );
+
+-- Idempotent : ajoute la colonne si la table existait déjà avant cette mise à jour
+ALTER TABLE prediction_results ADD COLUMN IF NOT EXISTS featured BOOLEAN NOT NULL DEFAULT true;
 
 CREATE INDEX IF NOT EXISTS idx_prediction_results_unresolved
   ON prediction_results(sport) WHERE resolved_at IS NULL;

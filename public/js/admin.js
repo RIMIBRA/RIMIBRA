@@ -19,7 +19,58 @@ function quotaBar(used, limit) {
     </div>`;
 }
 
-async function loadDashboard() {
+function sourceBadges(sources) {
+  const labels = { footballpred: 'FP', forebet: 'FB', besoccer: 'BS', oddsapi: 'Cotes', flashscore: 'FS', soccerway: 'SW' };
+  const active = Object.entries(sources || {}).filter(([, on]) => on).map(([key]) => labels[key] || key);
+  return active.length ? active.join(', ') : '—';
+}
+
+function predictionStatus(p) {
+  if (!p.resolved_at) return '⏳ À venir';
+  return p.correct ? '✅ Correct' : '❌ Incorrect';
+}
+
+function trackedRow(p) {
+  return `
+    <tr>
+      <td>${escapeHtml(p.league || '')}</td>
+      <td>${escapeHtml(p.home_team)} — ${escapeHtml(p.away_team)}</td>
+      <td>${escapeHtml(p.predicted_pick)}</td>
+      <td>${escapeHtml(p.confidence || '')}</td>
+      <td>${escapeHtml(sourceBadges(p.sources))}</td>
+      <td>${predictionStatus(p)}</td>
+    </tr>`;
+}
+
+async function loadTrackedPredictions(extraOnly) {
+  const params = new URLSearchParams({ date: new Date().toISOString().split('T')[0] });
+  if (extraOnly) params.set('featured', 'false');
+  const res = await fetch(`/api/admin/tracked-predictions?${params}`, { headers: authHeaders() });
+  if (!res.ok) return { count: 0, predictions: [] };
+  return res.json();
+}
+
+async function renderTrackedSection(extraOnly) {
+  const { count, predictions } = await loadTrackedPredictions(extraOnly);
+  const rows = predictions.length
+    ? predictions.map(trackedRow).join('')
+    : '<tr><td colspan="6">Aucun pronostic pour ce filtre aujourd\'hui.</td></tr>';
+
+  return `
+    <section>
+      <h2>Pronostics suivis aujourd'hui (${count})</h2>
+      <label style="display:block;margin-bottom:0.75rem;font-size:0.85rem;color:var(--muted)">
+        <input type="checkbox" id="extra-only-toggle" ${extraOnly ? 'checked' : ''}>
+        Afficher uniquement les matchs supplémentaires (suivi arrière-plan, jamais montrés aux visiteurs)
+      </label>
+      <table class="admin-table">
+        <thead><tr><th>Ligue</th><th>Match</th><th>Pronostic</th><th>Confiance</th><th>Sources</th><th>Statut</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </section>`;
+}
+
+async function loadDashboard(extraOnly = true) {
   const user = await fetchCurrentUser();
   if (!user) {
     main.innerHTML = '<p>Tu dois être connecté. <a href="/login.html">Se connecter</a></p>';
@@ -30,9 +81,10 @@ async function loadDashboard() {
     return;
   }
 
-  const [statsRes, usersRes] = await Promise.all([
+  const [statsRes, usersRes, trackedSection] = await Promise.all([
     fetch('/api/admin/stats', { headers: authHeaders() }),
     fetch('/api/admin/users', { headers: authHeaders() }),
+    renderTrackedSection(extraOnly),
   ]);
 
   if (!statsRes.ok || !usersRes.ok) {
@@ -74,6 +126,8 @@ async function loadDashboard() {
       ${quotaRows}
     </section>
 
+    ${trackedSection}
+
     <section>
       <h2>Liste des comptes</h2>
       <table class="admin-table">
@@ -82,6 +136,10 @@ async function loadDashboard() {
       </table>
     </section>
   `;
+
+  document.getElementById('extra-only-toggle')?.addEventListener('change', (e) => {
+    loadDashboard(e.target.checked);
+  });
 }
 
 loadDashboard();

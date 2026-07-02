@@ -221,7 +221,7 @@ function hasNoData(formHome, formAway, h2h) {
   );
 }
 
-async function analyzeFixture(fixture, fpredList = null, forebetList = null, oddsapiList = null) {
+async function analyzeFixture(fixture, fpredList = null, forebetList = null, oddsapiList = null, { featured = true } = {}) {
   const homeTeam = fixture.teams.home;
   const awayTeam = fixture.teams.away;
   const leagueId = fixture.league.id;
@@ -336,6 +336,7 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
         goalPrediction,
         sources: webSourceFlags,
         noApiData,
+        featured,
       })
       .catch((err) => console.error('Échec enregistrement pronostic (ignoré):', err.message));
   }
@@ -487,7 +488,7 @@ async function trackExtraFixturesForData(date) {
 
     await mapWithConcurrency(extra, BACKGROUND_CONCURRENCY, async (fixture) => {
       try {
-        await analyzeFixture(fixture, fpredList, forebetList, oddsapiList);
+        await analyzeFixture(fixture, fpredList, forebetList, oddsapiList, { featured: false });
       } catch {
         // Un match en échec ici ne doit pas interrompre les autres -> simplement pas de
         // pronostic enregistré pour celui-là cette fois-ci

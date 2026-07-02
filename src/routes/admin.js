@@ -60,6 +60,21 @@ router.get('/prediction-accuracy', async (req, res) => {
   }
 });
 
+// Liste les pronostics enregistrés (visiteurs + suivi arrière-plan) pour un jour donné —
+// featured=false isole les matchs suivis uniquement par trackExtraFixturesForData, jamais
+// montrés à un visiteur, pour vérifier ce que la tâche de fond ajoute réellement.
+router.get('/tracked-predictions', async (req, res) => {
+  try {
+    const sport = req.query.sport || 'football';
+    const date = req.query.date || new Date().toISOString().split('T')[0];
+    const featured = req.query.featured === undefined ? undefined : req.query.featured === 'true';
+    const predictions = await predictionResults.listPredictions({ sport, date, featured });
+    res.json({ sport, date, count: predictions.length, predictions });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/users', async (req, res) => {
   try {
     const users = await listUsersWithPlan();

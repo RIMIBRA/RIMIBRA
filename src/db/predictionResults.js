@@ -14,12 +14,13 @@ async function recordPrediction({
   goalPrediction,
   sources,
   noApiData,
+  featured = true,
 }) {
   await pool.query(
     `INSERT INTO prediction_results
        (sport, fixture_id, league, home_team, away_team, predicted_pick, confidence,
-        probabilities, goal_prediction, sources, no_api_data)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+        probabilities, goal_prediction, sources, no_api_data, featured)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      ON CONFLICT (sport, fixture_id) DO UPDATE SET
        predicted_pick = EXCLUDED.predicted_pick,
        confidence = EXCLUDED.confidence,
@@ -27,6 +28,7 @@ async function recordPrediction({
        goal_prediction = EXCLUDED.goal_prediction,
        sources = EXCLUDED.sources,
        no_api_data = EXCLUDED.no_api_data,
+       featured = EXCLUDED.featured OR prediction_results.featured,
        predicted_at = now()
      WHERE prediction_results.resolved_at IS NULL`,
     [
@@ -41,8 +43,40 @@ async function recordPrediction({
       JSON.stringify(goalPrediction || null),
       JSON.stringify(sources || {}),
       !!noApiData,
+      !!featured,
     ]
   );
+}
+
+// Pour le dashboard admin : les pronostics pris un jour donné, y compris ceux suivis
+// uniquement en tâche de fond (featured: false) et jamais montrés à un visiteur.
+// predicted_at sert de proxy pour "jour du match" (les matchs du jour sont analysés le jour
+// même) — suffisant ici, pas besoin d'une colonne kickoff dédiée pour un simple dashboard.
+async function listPredictions({ sport = 'football', date, featured, limit = 300 } = {}) {
+  const conditions = ['sport = $1'];
+  const params = [sport];
+
+  if (date) {
+    params.push(date);
+    conditions.push(`predicted_at::date = $${params.length}`);
+  }
+  if (featured !== undefined) {
+    params.push(featured);
+    conditions.push(`featured = $${params.length}`);
+  }
+  params.push(Math.min(1000, Math.max(1, limit)));
+
+  const { rows } = await pool.query(
+    `SELECT sport, fixture_id, league, home_team, away_team, predicted_pick, confidence,
+            probabilities, sources, no_api_data, featured, predicted_at,
+            actual_home_score, actual_away_score, correct, resolved_at
+     FROM prediction_results
+     WHERE ${conditions.join(' AND ')}
+     ORDER BY predicted_at DESC
+     LIMIT $${params.length}`,
+    params
+  );
+  return rows;
 }
 
 // Calcule le résultat (1X2 + BTTS/+2,5 si applicable) à partir du pronostic déjà enregistré,
@@ -132,4 +166,4 @@ async function getAccuracyStats(sport = 'football', sinceDays = 30) {
   };
 }
 
-module.exports = { recordPrediction, resolvePrediction, getAccuracyStats };
+module.exports = { recordPrediction, resolvePrediction, getAccuracyStats, listPredictions };
