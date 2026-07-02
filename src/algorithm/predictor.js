@@ -21,10 +21,17 @@ const predictionResults = require('../db/predictionResults');
 const FULL_ANALYSIS_TTL = 12 * 60; // 12 min : bon compromis vitesse/fraîcheur des statuts en direct
 
 const HOME_ADVANTAGE = 6;
+// Nombre de matchs analysés (et donc affichés) pour un visiteur -> garde le chargement rapide.
 const MAX_FIXTURES_PER_DAY = 30;
 // Les matchs s'analysent en parallèle (pas un par un) — limité pour ne pas saturer le
 // navigateur Puppeteer partagé ni déclencher de blocage anti-bot sur les sites scrapés
 const ANALYSIS_CONCURRENCY = 10;
+// Volume supplémentaire suivi en tâche de fond (voir trackExtraFixturesForData) uniquement pour
+// nourrir plus vite prediction_results — jamais exposé à un visiteur, donc sans impact sur le
+// temps de chargement. Concurrence volontairement basse : tourne pendant que de vrais visiteurs
+// utilisent peut-être le même navigateur Puppeteer partagé, ne doit jamais leur faire concurrence.
+const BACKGROUND_TRACKING_LIMIT = 150;
+const BACKGROUND_CONCURRENCY = 3;
 const MAX_SEARCH_RESULTS = 5;
 const UPCOMING_STATUSES = ['NS', 'TBD', '1H', 'HT', '2H'];
 const LIVE_STATUSES = ['1H', 'HT', '2H'];
@@ -138,6 +145,21 @@ const PRIORITY_LEAGUE_IDS = new Set([
 
 function isPriorityLeague(fixture) {
   return PRIORITY_LEAGUE_IDS.has(fixture.league.id);
+}
+
+// Trie les matchs à analyser en priorité : les rencontres "suivies" (cotes bookmaker,
+// footballpredictions) passent devant, et les compétitions jeunes/réserves/obscures
+// (qui n'ont ni historique ni cotes exploitables → analyse "données insuffisantes")
+// sont reléguées en fin de liste, pour laisser la place aux matchs vraiment intéressants
+// (ex : amicaux de sélections nationales avant une Coupe du Monde)
+function fixtureRank(f, oddsapiList, fpredList) {
+  let score = 0;
+  // Coupe du Monde et grands championnats : priorité forte, ce sont les pronostics les plus fiables
+  if (isPriorityLeague(f)) score += 10;
+  if (oddsapi.findMatch(oddsapiList, f.teams.home.name, f.teams.away.name)) score += 2;
+  if (footballpred.isInFpred(fpredList, f.teams.home.name, f.teams.away.name)) score += 1;
+  if (isLikelyMinor(f)) score -= 3;
+  return score;
 }
 
 function calcWeights(standingsAvailable) {
@@ -400,22 +422,7 @@ async function analyzeDayFixturesUncached(date) {
     return { ...webResult, results: [...webResult.results, ...finished] };
   }
 
-  // Trier les matchs à analyser en priorité : les rencontres "suivies" (cotes bookmaker,
-  // footballpredictions) passent devant, et les compétitions jeunes/réserves/obscures
-  // (qui n'ont ni historique ni cotes exploitables → analyse "données insuffisantes")
-  // sont reléguées en fin de liste, pour laisser la place aux matchs vraiment intéressants
-  // (ex : amicaux de sélections nationales avant une Coupe du Monde)
-  function fixtureRank(f) {
-    let score = 0;
-    // Coupe du Monde et grands championnats : priorité forte, ce sont les pronostics les plus fiables
-    if (isPriorityLeague(f)) score += 10;
-    if (oddsapi.findMatch(oddsapiList, f.teams.home.name, f.teams.away.name)) score += 2;
-    if (footballpred.isInFpred(fpredList, f.teams.home.name, f.teams.away.name)) score += 1;
-    if (isLikelyMinor(f)) score -= 3;
-    return score;
-  }
-
-  upcoming.sort((a, b) => fixtureRank(b) - fixtureRank(a));
+  upcoming.sort((a, b) => fixtureRank(b, oddsapiList, fpredList) - fixtureRank(a, oddsapiList, fpredList));
 
   const toAnalyze = upcoming.slice(0, MAX_FIXTURES_PER_DAY);
 
@@ -450,6 +457,47 @@ async function analyzeDayFixturesUncached(date) {
   });
 
   return { results: [...results, ...finished], total: upcoming.length, analyzed: toAnalyze.length };
+}
+
+let backgroundTrackingRunning = false;
+
+// Analyse des matchs AU-DELÀ des MAX_FIXTURES_PER_DAY affichés à un visiteur, uniquement pour
+// enregistrer leur pronostic dans prediction_results (voir analyzeFixture) et accélérer la
+// collecte de données de calibration — jamais appelée depuis une requête HTTP, donc aucun
+// visiteur n'attend sur ce travail. Concurrence volontairement réduite (BACKGROUND_CONCURRENCY)
+// pour ne pas ralentir de vrais visiteurs qui utiliseraient le navigateur Puppeteer partagé
+// au même moment.
+async function trackExtraFixturesForData(date) {
+  if (backgroundTrackingRunning) return; // déjà en cours -> ne pas empiler un second passage
+  backgroundTrackingRunning = true;
+  try {
+    const [fixtures, fpredList, forebetList, oddsapiList] = await Promise.all([
+      api.getFixturesByDate(date),
+      footballpred.getTodayPredictions(date).catch(() => []),
+      forebet.getTodayPredictions(date).catch(() => []),
+      oddsapi.getTodayOdds().catch(() => []),
+    ]);
+
+    if (api.getDailyRequestCount() >= api.DAILY_LIMIT) return; // quota épuisé -> rien à faire de plus
+
+    const upcoming = fixtures.filter((f) => UPCOMING_STATUSES.includes(f.fixture.status.short));
+    upcoming.sort((a, b) => fixtureRank(b, oddsapiList, fpredList) - fixtureRank(a, oddsapiList, fpredList));
+    // Les MAX_FIXTURES_PER_DAY premiers sont déjà couverts par le flux normal -> ne pas les refaire
+    const extra = upcoming.slice(MAX_FIXTURES_PER_DAY, BACKGROUND_TRACKING_LIMIT);
+
+    await mapWithConcurrency(extra, BACKGROUND_CONCURRENCY, async (fixture) => {
+      try {
+        await analyzeFixture(fixture, fpredList, forebetList, oddsapiList);
+      } catch {
+        // Un match en échec ici ne doit pas interrompre les autres -> simplement pas de
+        // pronostic enregistré pour celui-là cette fois-ci
+      }
+    });
+  } catch (err) {
+    console.error('Suivi arrière-plan des pronostics (ignoré):', err.message);
+  } finally {
+    backgroundTrackingRunning = false;
+  }
 }
 
 function fixtureMatchesQuery(fixture, terms) {
@@ -504,4 +552,5 @@ module.exports = {
   matchStateFor,
   computeValidation,
   isLikelyMinor,
+  trackExtraFixturesForData,
 };

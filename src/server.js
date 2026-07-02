@@ -4,6 +4,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const { attachUser, requireSportAccess, requireAdmin } = require('./auth/middleware');
+const { trackExtraFixturesForData } = require('./algorithm/predictor');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -38,3 +39,14 @@ app.get('*', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Football Predictor démarré sur http://localhost:${PORT}`);
 });
+
+// Alimente prediction_results avec des matchs au-delà de la sélection affichée aux visiteurs
+// (voir trackExtraFixturesForData), pour accumuler plus vite les données de calibration —
+// jamais dans le chemin d'une requête HTTP, donc sans impact sur la vitesse de chargement.
+const BACKGROUND_TRACKING_INTERVAL_MS = 45 * 60 * 1000;
+setInterval(() => {
+  const today = new Date().toISOString().split('T')[0];
+  trackExtraFixturesForData(today).catch((err) =>
+    console.error('Suivi arrière-plan des pronostics (ignoré):', err.message)
+  );
+}, BACKGROUND_TRACKING_INTERVAL_MS);
