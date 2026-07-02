@@ -109,7 +109,10 @@ function createTeamSportPredictor({
 
     // Pas de blend pour ces sports (aucune source web) -> le pronostic final EST le pronostic
     // de l'algo, algoPick/algoProbabilities sont donc identiques à predictedPick/probabilities.
-    if (matchState === 'upcoming' && !insufficientData) {
+    // `sport &&` : garde-fou si un futur sport oublie de le passer, pas une désactivation
+    // volontaire -> chaque sport ci-dessous le fournit et le suivi est actif pour tous
+    // (l'enregistrement ne coûte aucun appel API supplémentaire, juste une écriture DB).
+    if (sport && matchState === 'upcoming' && !insufficientData) {
       predictionResults
         .recordPrediction({
           sport,
@@ -206,11 +209,13 @@ function createTeamSportPredictor({
     const finishedGames = games.filter((f) => f.fixture.status.short === 'FT');
     const finished = finishedGames.map(finishedEntry);
 
-    for (const g of finishedGames) {
-      if (g.goals?.home != null && g.goals?.away != null) {
-        predictionResults
-          .resolvePrediction(sport, g.fixture.id, g.goals.home, g.goals.away)
-          .catch((err) => console.error(`Échec résolution pronostic ${sport} (ignoré):`, err.message));
+    if (sport) {
+      for (const g of finishedGames) {
+        if (g.goals?.home != null && g.goals?.away != null) {
+          predictionResults
+            .resolvePrediction(sport, g.fixture.id, g.goals.home, g.goals.away)
+            .catch((err) => console.error(`Échec résolution pronostic ${sport} (ignoré):`, err.message));
+        }
       }
     }
 

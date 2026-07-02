@@ -111,6 +111,7 @@ async function analyzeGame(game) {
 
   // Pas de blend pour la NBA (aucune source web) -> le pronostic final EST le pronostic de
   // l'algo, algoPick/algoProbabilities sont donc identiques à predictedPick/probabilities.
+  // Aucun coût de quota supplémentaire : simple écriture DB des données déjà récupérées.
   if (matchState === 'upcoming' && !insufficientData) {
     predictionResults
       .recordPrediction({
