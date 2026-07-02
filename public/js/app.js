@@ -85,10 +85,21 @@ function probClass(v) {
 }
 
 // Conseille un pari "victoire sèche" quand un résultat domine nettement,
-// sinon une "double chance" (deux issues combinées) quand le match est incertain
+// sinon une "double chance" (deux issues combinées) quand le match est incertain.
+// Si le marché réel juge ce pari sec trop évident (cote très basse, voir alternativeBet
+// côté backend), l'alternative devient directement le conseil principal affiché — plus la
+// peine d'annoncer "Victoire sèche" pour la reléguer aussitôt en dessous.
 function buildBetAdvice(p) {
   const { home, draw, away } = p.probabilities;
   const max = Math.max(home, draw, away);
+
+  if (p.alternativeBet) {
+    const obvious = home === max ? p.fixture.home : away === max ? p.fixture.away : 'Match nul';
+    return {
+      short: p.alternativeBet.alternative.market,
+      detail: `"Victoire sèche : ${obvious}" jugée trop évidente par le marché (cote ~${p.alternativeBet.mainPickOdd}) — alternative plus équilibrée, cote moyenne ${p.alternativeBet.alternative.odd}.`,
+    };
+  }
 
   if (max >= 50) {
     const label = home === max ? `Victoire sèche : ${p.fixture.home}`
@@ -249,17 +260,16 @@ function buildModalContent(p) {
 
     <div class="detail-section">
       <h3>Conseil de pari</h3>
-      <div class="stat-box">
-        <div class="label">Issue du match</div>
-        <div class="value" style="color:var(--blue);font-size:0.95rem">${buildBetAdvice(p).short}</div>
-        <div style="font-size:0.75rem;color:var(--muted);margin-top:0.3rem">${buildBetAdvice(p).detail}</div>
-      </div>
-      ${p.alternativeBet ? `
-      <div class="stat-box" style="margin-top:0.5rem;border:1px solid var(--yellow)">
-        <div class="label">⚠️ Pari sec trop évident (cote ~${p.alternativeBet.mainPickOdd ?? '1.0'}) — alternative plus équilibrée</div>
-        <div class="value" style="color:var(--yellow);font-size:0.95rem">${p.alternativeBet.alternative.market}</div>
-        <div style="font-size:0.75rem;color:var(--muted);margin-top:0.3rem">Cote moyenne observée chez les bookmakers : ${p.alternativeBet.alternative.odd}</div>
-      </div>` : ''}
+      ${(() => {
+        const advice = buildBetAdvice(p);
+        const isAlternative = !!p.alternativeBet;
+        return `
+      <div class="stat-box" ${isAlternative ? 'style="border:1px solid var(--yellow)"' : ''}>
+        <div class="label">${isAlternative ? '⚠️ Meilleur choix (pari sec jugé trop évident)' : 'Issue du match'}</div>
+        <div class="value" style="color:${isAlternative ? 'var(--yellow)' : 'var(--blue)'};font-size:0.95rem">${advice.short}</div>
+        <div style="font-size:0.75rem;color:var(--muted);margin-top:0.3rem">${advice.detail}</div>
+      </div>`;
+      })()}
       ${p.goalPrediction ? `
       <div class="grid-2" style="margin-top:0.5rem">
         <div class="stat-box">
