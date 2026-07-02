@@ -110,6 +110,40 @@ function buildFinishedEntry(f) {
   };
 }
 
+// Complète les pronostics pris quand ces matchs étaient encore "upcoming" — sans ré-analyser
+// (le score final suffit). Idempotent : resolvePrediction ignore les matchs déjà résolus ou
+// jamais pronostiqués (hors sélection, quota épuisé ce jour-là...).
+function resolveFinishedFixtures(finishedFixtures) {
+  for (const f of finishedFixtures) {
+    if (f.goals?.home != null && f.goals?.away != null) {
+      predictionResults
+        .resolvePrediction('football', f.fixture.id, f.goals.home, f.goals.away)
+        .catch((err) => console.error('Échec résolution pronostic (ignoré):', err.message));
+    }
+  }
+}
+
+// Résout les résultats indépendamment de toute visite : sans ça, un match ne se résout QUE
+// si un visiteur recharge /today pour sa date après le coup de sifflet final. Si le site est
+// resté silencieux (coupure serveur, faible trafic la nuit) ou que le match a basculé sur le
+// jour suivant, ces pronostics restaient bloqués "à venir" pour toujours. Couvre hier + aujourd'hui
+// pour rattraper un serveur resté éteint pendant la fin d'une journée de matchs.
+async function resolveRecentResults() {
+  const today = new Date();
+  const yesterday = new Date(today.getTime() - 24 * 3600 * 1000);
+  const dates = [yesterday, today].map((d) => d.toISOString().split('T')[0]);
+
+  for (const date of dates) {
+    try {
+      const fixtures = await api.getFixturesByDate(date);
+      const finishedFixtures = fixtures.filter((f) => FINISHED_STATUSES.includes(f.fixture.status.short));
+      resolveFinishedFixtures(finishedFixtures);
+    } catch (err) {
+      console.error(`Échec résolution des résultats du ${date} (ignoré):`, err.message);
+    }
+  }
+}
+
 // Compétitions jeunes / réserves : peu suivies (pas de cotes, pas d'historique exploitable),
 // on les laisse passer en dernier pour privilégier les rencontres avec de vraies données
 const MINOR_PATTERN = /\bU1[5-9]\b|\bU2[0-3]\b|\bYouth\b|\bJunior(?:s)?\b|\bReserves?\b|\bPrimavera\b|\bII\b/i;
@@ -412,16 +446,7 @@ async function analyzeDayFixturesUncached(date) {
   const finishedFixtures = fixtures.filter((f) => FINISHED_STATUSES.includes(f.fixture.status.short));
   const finished = finishedFixtures.map(buildFinishedEntry);
 
-  // Complète en arrière-plan les pronostics pris quand ces matchs étaient encore "upcoming" —
-  // sans ré-analyser (le score final suffit). Idempotent : resolvePrediction ignore les
-  // matchs déjà résolus ou jamais pronostiqués (hors sélection, quota épuisé ce jour-là...).
-  for (const f of finishedFixtures) {
-    if (f.goals?.home != null && f.goals?.away != null) {
-      predictionResults
-        .resolvePrediction('football', f.fixture.id, f.goals.home, f.goals.away)
-        .catch((err) => console.error('Échec résolution pronostic (ignoré):', err.message));
-    }
-  }
+  resolveFinishedFixtures(finishedFixtures);
 
   const apiLimited = api.getDailyRequestCount() >= api.DAILY_LIMIT;
 
@@ -568,4 +593,5 @@ module.exports = {
   computeValidation,
   isLikelyMinor,
   trackExtraFixturesForData,
+  resolveRecentResults,
 };

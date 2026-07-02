@@ -4,7 +4,7 @@ const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const path = require('path');
 const { attachUser, requireSportAccess, requireAdmin } = require('./auth/middleware');
-const { trackExtraFixturesForData } = require('./algorithm/predictor');
+const { trackExtraFixturesForData, resolveRecentResults } = require('./algorithm/predictor');
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -44,9 +44,18 @@ app.listen(PORT, () => {
 // (voir trackExtraFixturesForData), pour accumuler plus vite les données de calibration —
 // jamais dans le chemin d'une requête HTTP, donc sans impact sur la vitesse de chargement.
 const BACKGROUND_TRACKING_INTERVAL_MS = 45 * 60 * 1000;
+
+// Résout les pronostics dont le match est terminé (hier + aujourd'hui), indépendamment de
+// tout visiteur -> sans ça, un pronostic ne se résout que si quelqu'un recharge /today après
+// coup, et reste bloqué "à venir" pour toujours si le site est resté silencieux entre-temps
+// (coupure serveur, faible trafic nocturne). Lancé une fois au démarrage (rattrape ce qui
+// s'est terminé pendant que le serveur était éteint) puis sur la même minuterie.
+resolveRecentResults().catch((err) => console.error('Résolution des résultats au démarrage (ignorée):', err.message));
+
 setInterval(() => {
   const today = new Date().toISOString().split('T')[0];
   trackExtraFixturesForData(today).catch((err) =>
     console.error('Suivi arrière-plan des pronostics (ignoré):', err.message)
   );
+  resolveRecentResults().catch((err) => console.error('Résolution des résultats (ignorée):', err.message));
 }, BACKGROUND_TRACKING_INTERVAL_MS);
