@@ -63,6 +63,12 @@ CREATE TABLE IF NOT EXISTS prediction_results (
   predicted_pick    TEXT NOT NULL,
   confidence        TEXT,
   probabilities     JSONB,
+  -- Pronostic de l'algo SEUL, avant mélange avec les sources externes (blendProbabilities) —
+  -- sert à mesurer si le blend améliore vraiment les choses par rapport à l'algo nu, et à
+  -- calibrer son poids d'ancrage (voir algorithm/calibration.js) sur des données réelles.
+  algo_pick         TEXT,
+  algo_probabilities JSONB,
+  algo_correct      BOOLEAN,
   goal_prediction   JSONB,
   sources           JSONB NOT NULL DEFAULT '{}',
   no_api_data       BOOLEAN NOT NULL DEFAULT false,
@@ -81,6 +87,9 @@ CREATE TABLE IF NOT EXISTS prediction_results (
 
 -- Idempotent : ajoute la colonne si la table existait déjà avant cette mise à jour
 ALTER TABLE prediction_results ADD COLUMN IF NOT EXISTS featured BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE prediction_results ADD COLUMN IF NOT EXISTS algo_pick TEXT;
+ALTER TABLE prediction_results ADD COLUMN IF NOT EXISTS algo_probabilities JSONB;
+ALTER TABLE prediction_results ADD COLUMN IF NOT EXISTS algo_correct BOOLEAN;
 
 CREATE INDEX IF NOT EXISTS idx_prediction_results_unresolved
   ON prediction_results(sport) WHERE resolved_at IS NULL;

@@ -31,11 +31,13 @@ function predictionStatus(p) {
 }
 
 function trackedRow(p) {
+  const diverges = p.algo_pick && p.algo_pick !== p.predicted_pick;
   return `
     <tr>
       <td>${escapeHtml(p.league || '')}</td>
       <td>${escapeHtml(p.home_team)} — ${escapeHtml(p.away_team)}</td>
       <td>${escapeHtml(p.predicted_pick)}</td>
+      <td title="${diverges ? 'Diffère du pronostic final (blend) affiché à côté' : ''}">${escapeHtml(p.algo_pick || '—')}${diverges ? ' ⚠️' : ''}</td>
       <td>${escapeHtml(p.confidence || '')}</td>
       <td>${escapeHtml(sourceBadges(p.sources))}</td>
       <td>${predictionStatus(p)}</td>
@@ -54,7 +56,7 @@ async function renderTrackedSection(extraOnly) {
   const { count, predictions } = await loadTrackedPredictions(extraOnly);
   const rows = predictions.length
     ? predictions.map(trackedRow).join('')
-    : '<tr><td colspan="6">Aucun pronostic pour ce filtre aujourd\'hui.</td></tr>';
+    : '<tr><td colspan="7">Aucun pronostic pour ce filtre aujourd\'hui.</td></tr>';
 
   return `
     <section>
@@ -64,7 +66,7 @@ async function renderTrackedSection(extraOnly) {
         Afficher uniquement les matchs supplémentaires (suivi arrière-plan, jamais montrés aux visiteurs)
       </label>
       <table class="admin-table">
-        <thead><tr><th>Ligue</th><th>Match</th><th>Pronostic</th><th>Confiance</th><th>Sources</th><th>Statut</th></tr></thead>
+        <thead><tr><th>Ligue</th><th>Match</th><th>Pronostic</th><th>Algo seul</th><th>Confiance</th><th>Sources</th><th>Statut</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     </section>`;

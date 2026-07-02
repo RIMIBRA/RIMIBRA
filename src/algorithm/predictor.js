@@ -14,6 +14,7 @@ const { normalize, expandSearchTerms } = require('./teamAliases');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const cache = require('../cache/db');
 const predictionResults = require('../db/predictionResults');
+const calibration = require('./calibration');
 
 // L'analyse complète d'une journée (jusqu'à 200s) est mise en cache 2 minutes : le premier
 // visiteur paie le coût une fois, tous les suivants dans cette fenêtre ont une réponse quasi
@@ -189,6 +190,20 @@ function calcProbabilities(homeScore, awayScore) {
   };
 }
 
+// Extrait pour être réutilisé sur les probabilités brutes de l'algo (avant blend) — sert à
+// enregistrer algoPick dans prediction_results et mesurer si le blend aide vraiment (voir
+// algorithm/calibration.js), en appliquant exactement la même règle de décision.
+function pickFromProbabilities(probs, homeScore, awayScore) {
+  let pick;
+  if (probs.home >= probs.away && probs.home >= probs.draw) pick = '1 (Domicile)';
+  else if (probs.away >= probs.home && probs.away >= probs.draw) pick = '2 (Extérieur)';
+  else pick = 'X (Nul)';
+
+  if (probs.draw > 28 && Math.abs(homeScore - awayScore) < 8) pick = 'X (Nul)';
+
+  return pick;
+}
+
 function getRecommendation(probs, homeScore, awayScore, webSources, insufficientData) {
   if (insufficientData) {
     return { pick: 'Analyse non disponible', confidence: 'Faible' };
@@ -202,14 +217,7 @@ function getRecommendation(probs, homeScore, awayScore, webSources, insufficient
   else if (diff > 10) confidence = hasWebData ? 'Élevée' : 'Moyenne';
   else confidence = hasWebData ? 'Moyenne' : 'Faible';
 
-  let pick;
-  if (probs.home >= probs.away && probs.home >= probs.draw) pick = '1 (Domicile)';
-  else if (probs.away >= probs.home && probs.away >= probs.draw) pick = '2 (Extérieur)';
-  else pick = 'X (Nul)';
-
-  if (probs.draw > 28 && Math.abs(homeScore - awayScore) < 8) pick = 'X (Nul)';
-
-  return { pick, confidence };
+  return { pick: pickFromProbabilities(probs, homeScore, awayScore), confidence };
 }
 
 function hasNoData(formHome, formAway, h2h) {
@@ -302,8 +310,12 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
   // Quand l'algo n'a pas de données réelles (forme/H2H vides), ne pas le compter double
   // dans le blend — laisser les cotes bookmaker (oddsapi) exprimer leur signal sans être
   // noyées par le bruit 50/50 des valeurs par défaut de l'algo
-  const finalProbs = scraper.blendProbabilities(algoProbs, web, !noApiData);
+  // blendWeights : recalculés depuis prediction_results (algorithm/calibration.js) — poids
+  // par défaut tant qu'il n'y a pas assez de pronostics résolus pour calibrer
+  const blendWeights = calibration.getWeights();
+  const finalProbs = scraper.blendProbabilities(algoProbs, web, !noApiData, blendWeights);
   const recommendation = getRecommendation(finalProbs, homeScore, awayScore, web, insufficientData);
+  const algoPick = pickFromProbabilities(algoProbs, homeScore, awayScore);
   const goalPrediction = calcGoalPrediction(formHome, formAway);
   const matchState = matchStateFor(fixture.fixture.status.short, fixture.fixture.date);
   const validation = matchState === 'finished'
@@ -333,6 +345,8 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
         predictedPick: recommendation.pick,
         confidence: recommendation.confidence,
         probabilities: finalProbs,
+        algoPick,
+        algoProbabilities: algoProbs,
         goalPrediction,
         sources: webSourceFlags,
         noApiData,

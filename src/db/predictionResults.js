@@ -11,6 +11,8 @@ async function recordPrediction({
   predictedPick,
   confidence,
   probabilities,
+  algoPick,
+  algoProbabilities,
   goalPrediction,
   sources,
   noApiData,
@@ -19,12 +21,14 @@ async function recordPrediction({
   await pool.query(
     `INSERT INTO prediction_results
        (sport, fixture_id, league, home_team, away_team, predicted_pick, confidence,
-        probabilities, goal_prediction, sources, no_api_data, featured)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+        probabilities, algo_pick, algo_probabilities, goal_prediction, sources, no_api_data, featured)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      ON CONFLICT (sport, fixture_id) DO UPDATE SET
        predicted_pick = EXCLUDED.predicted_pick,
        confidence = EXCLUDED.confidence,
        probabilities = EXCLUDED.probabilities,
+       algo_pick = EXCLUDED.algo_pick,
+       algo_probabilities = EXCLUDED.algo_probabilities,
        goal_prediction = EXCLUDED.goal_prediction,
        sources = EXCLUDED.sources,
        no_api_data = EXCLUDED.no_api_data,
@@ -40,6 +44,8 @@ async function recordPrediction({
       predictedPick,
       confidence || null,
       JSON.stringify(probabilities || {}),
+      algoPick || null,
+      JSON.stringify(algoProbabilities || null),
       JSON.stringify(goalPrediction || null),
       JSON.stringify(sources || {}),
       !!noApiData,
@@ -68,8 +74,8 @@ async function listPredictions({ sport = 'football', date, featured, limit = 300
 
   const { rows } = await pool.query(
     `SELECT sport, fixture_id, league, home_team, away_team, predicted_pick, confidence,
-            probabilities, sources, no_api_data, featured, predicted_at,
-            actual_home_score, actual_away_score, correct, resolved_at
+            probabilities, algo_pick, sources, no_api_data, featured, predicted_at,
+            actual_home_score, actual_away_score, correct, algo_correct, resolved_at
      FROM prediction_results
      WHERE ${conditions.join(' AND ')}
      ORDER BY predicted_at DESC
@@ -86,7 +92,7 @@ async function resolvePrediction(sport, fixtureId, homeScore, awayScore) {
   if (homeScore == null || awayScore == null) return;
 
   const { rows } = await pool.query(
-    `SELECT predicted_pick, goal_prediction FROM prediction_results
+    `SELECT predicted_pick, algo_pick, goal_prediction FROM prediction_results
      WHERE sport = $1 AND fixture_id = $2 AND resolved_at IS NULL`,
     [sport, String(fixtureId)]
   );
@@ -98,6 +104,7 @@ async function resolvePrediction(sport, fixtureId, homeScore, awayScore) {
   else if (awayScore > homeScore) actualPick = '2 (Extérieur)';
   else actualPick = 'X (Nul)';
   const correct = actualPick === row.predicted_pick;
+  const algoCorrect = row.algo_pick ? actualPick === row.algo_pick : null;
 
   // btts/over25 entre 41 et 54% = pas de pronostic tranché au moment de l'analyse -> rien à
   // valider pour btts (même règle que computeValidation dans algorithm/predictor.js)
@@ -114,9 +121,9 @@ async function resolvePrediction(sport, fixtureId, homeScore, awayScore) {
   await pool.query(
     `UPDATE prediction_results
      SET actual_home_score = $3, actual_away_score = $4, correct = $5,
-         btts_correct = $6, over25_correct = $7, resolved_at = now()
+         algo_correct = $6, btts_correct = $7, over25_correct = $8, resolved_at = now()
      WHERE sport = $1 AND fixture_id = $2`,
-    [sport, String(fixtureId), homeScore, awayScore, correct, bttsCorrect, over25Correct]
+    [sport, String(fixtureId), homeScore, awayScore, correct, algoCorrect, bttsCorrect, over25Correct]
   );
 }
 
@@ -138,7 +145,9 @@ async function getAccuracyStats(sport = 'football', sinceDays = 30) {
        COUNT(*) FILTER (WHERE resolved_at IS NOT NULL AND confidence = 'Élevée') AS high_conf_resolved,
        COUNT(*) FILTER (WHERE correct = true AND confidence = 'Élevée') AS high_conf_correct,
        COUNT(*) FILTER (WHERE resolved_at IS NOT NULL AND no_api_data) AS algo_only_resolved,
-       COUNT(*) FILTER (WHERE correct = true AND no_api_data) AS algo_only_correct
+       COUNT(*) FILTER (WHERE correct = true AND no_api_data) AS algo_only_correct,
+       COUNT(*) FILTER (WHERE resolved_at IS NOT NULL AND algo_pick IS NOT NULL) AS algo_pick_resolved,
+       COUNT(*) FILTER (WHERE algo_correct = true) AS algo_pick_correct
        ${sourceColumns ? ',' + sourceColumns : ''}
      FROM prediction_results
      WHERE sport = $1 AND predicted_at >= now() - make_interval(days => $2::int)`,
@@ -157,9 +166,15 @@ async function getAccuracyStats(sport = 'football', sinceDays = 30) {
   return {
     sport,
     sinceDays,
+    // Pronostic final envoyé aux visiteurs (algo + blend avec les sources externes)
     overall: bucket('resolved', 'correct'),
     highConfidence: bucket('high_conf_resolved', 'high_conf_correct'),
+    // Matchs où l'algo n'avait aucune donnée interne (forme/h2h vides) -> sous-ensemble de "overall"
     algoOnly: bucket('algo_only_resolved', 'algo_only_correct'),
+    // Ce qu'aurait donné l'algo SEUL, avant blend, sur les MÊMES matchs que "overall" -> la
+    // comparaison directe qui dit si le blend aide vraiment ou si l'algo nu suffirait.
+    // Alimente calibration.js pour ajuster le poids d'ancrage de l'algo dans blendProbabilities.
+    algoAlone: bucket('algo_pick_resolved', 'algo_pick_correct'),
     bySource: Object.fromEntries(
       SOURCE_KEYS.map((key) => [key, bucket(`${key}_resolved`, `${key}_correct`)])
     ),
