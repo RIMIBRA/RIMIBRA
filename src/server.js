@@ -6,6 +6,14 @@ const path = require('path');
 const { attachUser, requireSportAccess, requireAdmin } = require('./auth/middleware');
 const { trackExtraFixturesForData, resolveRecentResults } = require('./algorithm/predictor');
 
+// Filet de sécurité : loggue au lieu de laisser Node tuer tout le process. Sans process
+// manager (pas de PM2/Docker ici) un crash veut dire arrêt total jusqu'à relance manuelle —
+// sur plusieurs semaines de collecte continue de pronostics, une seule promesse oubliée
+// quelque part suffirait sinon à couper l'app en pleine nuit.
+process.on('unhandledRejection', (err) => {
+  console.error('Rejet de promesse non géré (ignoré) :', err?.message || err);
+});
+
 const app = express();
 const PORT = process.env.PORT || 3001;
 
