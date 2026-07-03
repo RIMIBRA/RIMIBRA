@@ -2,6 +2,42 @@ const main = document.getElementById('admin-main');
 const PLAN_LABEL = { free: 'Gratuit', premium: 'Premium', vip: 'VIP' };
 const TRACKED_SPORTS = ['football', 'nba', 'nfl', 'hockey', 'baseball', 'handball', 'tennis'];
 const SPORT_LABEL = { football: 'Football', nba: 'NBA', nfl: 'NFL', hockey: 'Hockey', baseball: 'Baseball', handball: 'Handball', tennis: 'Tennis' };
+const SPORT_BASE = {
+  football: '/api/predictions',
+  nba: '/api/nba/predictions',
+  nfl: '/api/nfl/predictions',
+  hockey: '/api/hockey/predictions',
+  baseball: '/api/baseball/predictions',
+  handball: '/api/handball/predictions',
+  tennis: '/api/tennis/predictions',
+};
+
+// Détail d'un match au clic sur une ligne — même modale que la section foot de l'app
+// principale (buildModalContent/buildValidationContent viennent de js/matchModal.js).
+const modal = document.getElementById('modal');
+const modalContent = document.getElementById('modal-content');
+const modalClose = document.getElementById('modal-close');
+const modalBackdrop = document.getElementById('modal-backdrop');
+modalClose?.addEventListener('click', () => modal.classList.add('hidden'));
+modalBackdrop?.addEventListener('click', () => modal.classList.add('hidden'));
+
+function singleMatchEndpoint(sport, id) {
+  const base = SPORT_BASE[sport] || SPORT_BASE.football;
+  return sport === 'football' ? `${base}/fixture/${id}` : `${base}/game/${id}`;
+}
+
+async function openTrackedMatchModal(sport, fixtureId) {
+  modalContent.innerHTML = '<p style="text-align:center;padding:2rem;color:var(--muted)">Chargement…</p>';
+  modal.classList.remove('hidden');
+  try {
+    const res = await fetch(singleMatchEndpoint(sport, fixtureId), { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Analyse impossible');
+    modalContent.innerHTML = data.matchState === 'finished' ? buildValidationContent(data) : buildModalContent(data);
+  } catch (err) {
+    modalContent.innerHTML = `<p style="color:var(--red)">Erreur : ${err.message}</p>`;
+  }
+}
 
 // L'email est fourni par l'utilisateur à l'inscription — jamais de confiance avant
 // affichage, sinon un email du type "><script>...</script>@x.com" s'exécute ici.
@@ -35,7 +71,7 @@ function predictionStatus(p) {
 function trackedRow(p) {
   const diverges = p.algo_pick && p.algo_pick !== p.predicted_pick;
   return `
-    <tr>
+    <tr class="tracked-row" style="cursor:pointer" data-sport="${p.sport}" data-fixture-id="${p.fixture_id}" title="Cliquer pour voir le détail du match">
       <td>${escapeHtml(p.league || '')}</td>
       <td>${escapeHtml(p.home_team)} — ${escapeHtml(p.away_team)}</td>
       <td>${escapeHtml(p.predicted_pick)}</td>
@@ -161,6 +197,9 @@ async function loadDashboard(extraOnly = true, sport = 'football') {
     // de sport évite un tableau vide silencieux qui laisserait croire à un bug
     const newSport = e.target.value;
     loadDashboard(newSport === 'football' && extraOnly, newSport);
+  });
+  document.querySelectorAll('.tracked-row').forEach((row) => {
+    row.addEventListener('click', () => openTrackedMatchModal(row.dataset.sport, row.dataset.fixtureId));
   });
 }
 
