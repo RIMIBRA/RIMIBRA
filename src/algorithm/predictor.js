@@ -2,7 +2,7 @@ const api = require('../api/client');
 const { analyzeForm } = require('./form');
 const { analyzeH2H } = require('./h2h');
 const { analyzeStandings } = require('./standings');
-const { analyzeInjuries } = require('./injuries');
+const { analyzeInjuries, refineWithLineups } = require('./injuries');
 const { calcGoalPrediction } = require('./goals');
 const scraper = require('../scraper/index');
 const footballpred = require('../scraper/footballpred');
@@ -36,6 +36,19 @@ const BACKGROUND_CONCURRENCY = 3;
 const MAX_SEARCH_RESULTS = 5;
 const UPCOMING_STATUSES = ['NS', 'TBD', '1H', 'HT', '2H'];
 const LIVE_STATUSES = ['1H', 'HT', '2H'];
+
+// Le fournisseur ne publie la composition officielle que ~20-75 min avant le coup d'envoi,
+// jamais avant -> inutile (et coûteux en quota) de l'interroger en dehors de cette fenêtre,
+// elle reviendrait systématiquement vide. Marge incluse des deux côtés (avant : certaines
+// ligues publient un peu plus tôt ; après : reste utile en tout début de match).
+const LINEUP_LOOKAHEAD_MINUTES = 90;
+const LINEUP_LOOKBEHIND_MINUTES = 30;
+
+function isLineupWindow(kickoffIso) {
+  if (!kickoffIso) return false;
+  const minutesUntilKickoff = (new Date(kickoffIso).getTime() - Date.now()) / 60000;
+  return minutesUntilKickoff <= LINEUP_LOOKAHEAD_MINUTES && minutesUntilKickoff >= -LINEUP_LOOKBEHIND_MINUTES;
+}
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN', 'AWD', 'WO'];
 
 // Trois états pour permettre un filtre Terminés / En cours / À venir côté interface.
@@ -279,6 +292,10 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
     !footballpred.isInFpred(fpredList, homeTeam.name, awayTeam.name)
   );
 
+  // Composition officielle : seulement dans sa fenêtre de publication (voir isLineupWindow),
+  // sinon le fournisseur renvoie systématiquement vide -> pas la peine de payer l'appel.
+  const shouldFetchLineups = isLineupWindow(fixture.fixture.date);
+
   // API + enrichissement web en parallèle (fpredList déjà récupéré, pas de re-fetch)
   const [apiResults, webSources] = await Promise.allSettled([
     Promise.allSettled([
@@ -287,11 +304,12 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
       api.getH2H(homeTeam.id, awayTeam.id, 10),
       api.getStandings(leagueId, season),
       api.getInjuries(fixtureId),
+      shouldFetchLineups ? api.getLineups(fixtureId) : Promise.resolve(null),
     ]).then((results) => results.map((r) => (r.status === 'fulfilled' ? r.value : null))),
     scraper.enrichFixture(homeTeam.name, awayTeam.name, date, fpredList, forebetList, oddsapiList, minor),
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : null)));
 
-  const [homeFixtures, awayFixtures, h2hFixtures, standingsData, injuriesData] = apiResults || [null, null, null, null, null];
+  const [homeFixtures, awayFixtures, h2hFixtures, standingsData, injuriesData, lineupsData] = apiResults || [null, null, null, null, null, null];
   const web = webSources || {};
 
   let formHome = analyzeForm(homeFixtures, homeTeam.id);
@@ -311,7 +329,10 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
   if (swAway) formAway = swAway;
   const h2h = analyzeH2H(h2hFixtures, homeTeam.id, awayTeam.id);
   const standings = analyzeStandings(standingsData, homeTeam.id, awayTeam.id);
-  const injuries = analyzeInjuries(injuriesData, homeTeam.id, awayTeam.id);
+  const injuriesBase = analyzeInjuries(injuriesData, homeTeam.id, awayTeam.id);
+  // Affine avec la composition confirmée si elle est disponible (voir shouldFetchLineups) —
+  // un joueur listé blessé/incertain qui apparaît quand même dans le groupe n'est plus pénalisé.
+  const injuries = lineupsData ? refineWithLineups(injuriesBase, lineupsData, homeTeam.id, awayTeam.id) : injuriesBase;
 
   const weights = calcWeights(standings.available);
 

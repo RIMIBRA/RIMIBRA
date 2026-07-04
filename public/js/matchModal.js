@@ -185,7 +185,7 @@ function buildModalContent(p) {
     </div>` : ''}
 
     <div class="detail-section">
-      <h3>Joueurs absents / suspendus</h3>
+      <h3>Joueurs absents / suspendus${(b.injuries.team1.lineupConfirmed || b.injuries.team2.lineupConfirmed) ? ' <span style="font-size:0.7rem;font-weight:400;color:var(--green)">— confirmé par la composition officielle</span>' : ''}</h3>
       <div class="grid-2">
         <div class="stat-box">
           <div class="label">${p.fixture.home} — ${b.injuries.team1.count} absent(s)</div>
@@ -194,7 +194,7 @@ function buildModalContent(p) {
               <div class="injury-row">
                 <span class="injury-name">${pl.name}</span>
                 <span class="injury-pos">${pl.position}</span>
-                <span class="injury-reason ${pl.suspended ? 'suspended' : 'injured'}">${pl.suspended ? '🟥 Suspendu' : '🤕 ' + pl.reason}</span>
+                <span class="injury-reason ${pl.confirmedAvailable ? '' : (pl.suspended ? 'suspended' : 'injured')}" style="${pl.confirmedAvailable ? 'color:var(--green)' : ''}">${pl.confirmedAvailable ? '✅ Finalement disponible' : (pl.suspended ? '🟥 Suspendu' : '🤕 ' + pl.reason)}</span>
               </div>`).join('')
             : '<div style="color:var(--muted);font-size:0.8rem">Aucun absent connu</div>'}
         </div>
@@ -205,12 +205,31 @@ function buildModalContent(p) {
               <div class="injury-row">
                 <span class="injury-name">${pl.name}</span>
                 <span class="injury-pos">${pl.position}</span>
-                <span class="injury-reason ${pl.suspended ? 'suspended' : 'injured'}">${pl.suspended ? '🟥 Suspendu' : '🤕 ' + pl.reason}</span>
+                <span class="injury-reason ${pl.confirmedAvailable ? '' : (pl.suspended ? 'suspended' : 'injured')}" style="${pl.confirmedAvailable ? 'color:var(--green)' : ''}">${pl.confirmedAvailable ? '✅ Finalement disponible' : (pl.suspended ? '🟥 Suspendu' : '🤕 ' + pl.reason)}</span>
               </div>`).join('')
             : '<div style="color:var(--muted);font-size:0.8rem">Aucun absent connu</div>'}
         </div>
       </div>
     </div>
+
+    ${(b.injuries.team1.lineupConfirmed || b.injuries.team2.lineupConfirmed) ? `
+    <div class="detail-section">
+      <h3>Composition officielle</h3>
+      <div class="grid-2">
+        <div class="stat-box">
+          <div class="label">${p.fixture.home}${b.injuries.team1.formation ? ` (${b.injuries.team1.formation})` : ''}</div>
+          ${b.injuries.team1.startXI?.length > 0
+            ? `<div style="font-size:0.8rem;line-height:1.6">${b.injuries.team1.startXI.join(', ')}</div>`
+            : '<div style="color:var(--muted);font-size:0.8rem">Pas encore publiée</div>'}
+        </div>
+        <div class="stat-box">
+          <div class="label">${p.fixture.away}${b.injuries.team2.formation ? ` (${b.injuries.team2.formation})` : ''}</div>
+          ${b.injuries.team2.startXI?.length > 0
+            ? `<div style="font-size:0.8rem;line-height:1.6">${b.injuries.team2.startXI.join(', ')}</div>`
+            : '<div style="color:var(--muted);font-size:0.8rem">Pas encore publiée</div>'}
+        </div>
+      </div>
+    </div>` : ''}
   `;
 }
 
