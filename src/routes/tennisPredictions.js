@@ -3,6 +3,7 @@ const router = express.Router();
 const api = require('../api/tennisClient');
 const predictor = require('../algorithm/tennisPredictor');
 const { requireAdmin } = require('../auth/middleware');
+const { applyBreakdownGate } = require('../auth/breakdownGate');
 const cache = require('../cache/db');
 const { mapWithConcurrency } = require('../utils/concurrency');
 
@@ -132,7 +133,7 @@ router.get('/game/:id', async (req, res) => {
     if (!game) return res.status(404).json({ error: 'Match introuvable' });
     const analysis = await predictor.analyzeGame(game);
     const alternativeBet = await buildAlternativeBet(req.params.id, analysis);
-    res.json({ ...analysis, alternativeBet });
+    res.json(await applyBreakdownGate({ ...analysis, alternativeBet }, req, 'tennis'));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

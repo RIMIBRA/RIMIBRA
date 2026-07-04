@@ -27,8 +27,14 @@ const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeade
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
 
+// Tant qu'il n'y a pas de vérification serveur réelle du visionnage (voir routes/ads.js),
+// ce taux limite au moins l'abus grossier (appels directs en boucle sans passer par une pub)
+const adsLimiter = rateLimit({ windowMs: 60 * 1000, max: 20, standardHeaders: true, legacyHeaders: false });
+app.use('/api/ads', adsLimiter);
+
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/admin', require('./routes/admin'));
+app.use('/api/ads', require('./routes/ads'));
 
 // Foot reste accessible en plan gratuit ; les autres sports nécessitent premium ou plus
 app.use('/api/predictions', require('./routes/predictions'));

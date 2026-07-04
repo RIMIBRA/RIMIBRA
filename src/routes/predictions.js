@@ -5,6 +5,7 @@ const api = require('../api/client');
 const oddsapi = require('../scraper/oddsapi');
 const { requireFeature, requireAdmin } = require('../auth/middleware');
 const { isFreePreviewMatch } = require('../auth/tiers');
+const { applyBreakdownGate } = require('../auth/breakdownGate');
 
 // "Trop évident" se juge sur la VRAIE cote bookmaker, jamais sur la confiance de notre propre
 // algo : les deux peuvent diverger fortement (notre modèle peut être à 68% alors que le marché
@@ -97,7 +98,7 @@ router.get('/fixture/:id', async (req, res) => {
     if (!fixture) return res.status(404).json({ error: 'Match introuvable' });
     const analysis = await analyzeFixture(fixture);
     const alternativeBet = await buildAlternativeBet(fixture, analysis);
-    res.json({ ...analysis, alternativeBet });
+    res.json(await applyBreakdownGate({ ...analysis, alternativeBet }, req, 'football'));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

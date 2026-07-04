@@ -488,6 +488,29 @@ btnLoad.addEventListener('click', () => {
 modalClose.addEventListener('click', () => modal.classList.add('hidden'));
 modalBackdrop.addEventListener('click', () => modal.classList.add('hidden'));
 
+// Délégation d'événement : le bouton est recréé à chaque rendu de la modale (innerHTML
+// remplacé), un seul listener ici suffit pour tous ses rendus successifs.
+modalContent.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.ad-unlock-btn');
+  if (!btn) return;
+  const { sport, fixtureId } = btn.dataset;
+
+  showRewardedAd(async () => {
+    btn.disabled = true;
+    btn.textContent = 'Déblocage…';
+    try {
+      await unlockBreakdown(sport, fixtureId);
+      const res = await fetch(singleMatchEndpoint(fixtureId), { headers: authHeaders() });
+      const fresh = await res.json();
+      modalContent.innerHTML = buildModalContent(fresh);
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = '📺 Débloquer avec une pub';
+      alert('Déblocage impossible : ' + err.message);
+    }
+  });
+});
+
 topFilters.querySelectorAll('.filter-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
     topFilters.querySelectorAll('.filter-btn').forEach((b) => b.classList.remove('active'));

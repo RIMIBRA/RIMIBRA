@@ -95,3 +95,18 @@ CREATE INDEX IF NOT EXISTS idx_prediction_results_unresolved
   ON prediction_results(sport) WHERE resolved_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_prediction_results_predicted_at
   ON prediction_results(sport, predicted_at);
+
+-- Déblocage du détail complet (breakdown : forme, H2H, blessures, cotes — normalement réservé
+-- au plan VIP, voir tiers.js) contre le visionnage d'une pub récompensée, match par match,
+-- pour un utilisateur gratuit/premium. Persistant : un match déjà débloqué le reste (pas de
+-- nouvelle pub à chaque fois qu'on rouvre le même match).
+CREATE TABLE IF NOT EXISTS ad_unlocks (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  sport       TEXT NOT NULL,
+  fixture_id  TEXT NOT NULL,
+  unlocked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (user_id, sport, fixture_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ad_unlocks_lookup ON ad_unlocks(user_id, sport, fixture_id);
