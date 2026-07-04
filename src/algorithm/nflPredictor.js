@@ -86,25 +86,63 @@ function hasNoData(formHome, formAway, h2h) {
   return formHome.score === 50 && formAway.score === 50 && h2h.score1 === 50 && h2h.score2 === 50;
 }
 
+// Rapport blessures NFL : vérifié directement contre l'API — pas d'endpoint "lineups" pour ce
+// sport chez ce fournisseur (aucune confirmation possible via la composition officielle,
+// contrairement au foot), et /injuries ne renvoie ni la position du joueur ni un champ
+// "suspendu" séparé (juste status + description) -> impact uniforme par joueur listé, pas
+// pondéré par poste comme pour le foot.
+function injurySeverity(status) {
+  const s = (status || '').toLowerCase();
+  if (s.includes('out') || s === 'i.l.' || s.includes('ir') || s.includes('pup')) return 1.5;
+  if (s.includes('doubtful')) return 1.3;
+  if (s.includes('questionable')) return 1.0;
+  return 1.1; // statut non reconnu (le champ est parfois mal renseigné côté fournisseur) -> poids prudent
+}
+
+function analyzeNflInjuries(injuriesData) {
+  if (!injuriesData || injuriesData.length === 0) return { score: 100, count: 0, players: [] };
+
+  let totalImpact = 0;
+  const players = injuriesData.map((injury) => {
+    const impact = injurySeverity(injury.status);
+    totalImpact += impact;
+    return {
+      name: injury.player?.name || 'Inconnu',
+      position: injury.status || '—', // pas de poste fourni par cet endpoint -> le statut à la place
+      reason: injury.description || '—',
+      suspended: false, // endpoint blessures uniquement, jamais de suspension ici
+    };
+  });
+
+  const penalty = Math.min(totalImpact * 8, 60);
+  return { score: Math.round(100 - penalty), count: players.length, players };
+}
+
 async function analyzeGame(game) {
   const homeTeam = game.teams.home;
   const awayTeam = game.teams.away;
   const fixtureId = game.fixture.id;
 
-  const [homeGames, awayGames, h2hGames] = await Promise.all([
+  const [homeGames, awayGames, h2hGames, homeInjuriesData, awayInjuriesData] = await Promise.all([
     api.getTeamLastGames(homeTeam.id, 5, game.fixture.date),
     api.getTeamLastGames(awayTeam.id, 5, game.fixture.date),
     api.getH2H(homeTeam.id, awayTeam.id, 10),
+    api.getInjuries(homeTeam.id).catch(() => []),
+    api.getInjuries(awayTeam.id).catch(() => []),
   ]);
 
   const formHome = analyzeForm(homeGames, homeTeam.id);
   const formAway = analyzeForm(awayGames, awayTeam.id);
   const h2h = analyzeH2H(h2hGames, homeTeam.id, awayTeam.id);
+  const injuries = {
+    team1: analyzeNflInjuries(homeInjuriesData),
+    team2: analyzeNflInjuries(awayInjuriesData),
+  };
 
-  // Pas de classement/blessures fiables pour l'instant -> tout le poids sur forme + H2H
-  const weights = { form: 0.65, h2h: 0.35 };
-  const homeScore = formHome.score * weights.form + h2h.score1 * weights.h2h;
-  const awayScore = formAway.score * weights.form + h2h.score2 * weights.h2h;
+  // Pas de classement fiable pour l'instant -> le poids restant va sur forme + H2H + blessures
+  const weights = { form: 0.55, h2h: 0.30, injuries: 0.15 };
+  const homeScore = formHome.score * weights.form + h2h.score1 * weights.h2h + injuries.team1.score * weights.injuries;
+  const awayScore = formAway.score * weights.form + h2h.score2 * weights.h2h + injuries.team2.score * weights.injuries;
 
   const probs = calcProbabilities(homeScore, awayScore);
   const insufficientData = hasNoData(formHome, formAway, h2h);
@@ -162,7 +200,7 @@ async function analyzeGame(game) {
       form: { home: formHome, away: formAway },
       h2h,
       standings: { available: false },
-      injuries: { team1: { count: 0, players: [] }, team2: { count: 0, players: [] } },
+      injuries,
     },
   };
 }
