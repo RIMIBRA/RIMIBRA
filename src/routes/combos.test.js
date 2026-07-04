@@ -1,8 +1,8 @@
 const { pickProbability, isComboCandidate, buildComboMatches, summarize, addDays } = require('./combos');
 
-function fakePrediction({ id, pick, home = 60, draw = 20, away = 20, finished = false, error = false, insufficientData = false }) {
+function fakePrediction({ id, pick, home = 60, draw = 20, away = 20, finished = false, error = false, insufficientData = false, leagueId }) {
   return {
-    fixture: { id },
+    fixture: { id, leagueId },
     recommendation: { pick, confidence: 'Moyenne' },
     probabilities: { home, draw, away },
     matchState: finished ? 'finished' : 'upcoming',
@@ -49,6 +49,16 @@ describe('isComboCandidate', () => {
   test('accepts a clean, unused, upcoming prediction', () => {
     const p = fakePrediction({ id: 1, pick: '1 (Domicile)' });
     expect(isComboCandidate(p, new Set())).toBe(true);
+  });
+
+  test('rejects a prediction outside the requested league filter', () => {
+    const p = fakePrediction({ id: 1, pick: '1 (Domicile)', leagueId: 39 }); // Premier League
+    expect(isComboCandidate(p, new Set(), 1)).toBe(false); // filtre = Coupe du Monde
+  });
+
+  test('accepts a prediction matching the requested league filter', () => {
+    const p = fakePrediction({ id: 1, pick: '1 (Domicile)', leagueId: 1 });
+    expect(isComboCandidate(p, new Set(), 1)).toBe(true);
   });
 });
 
@@ -99,6 +109,24 @@ describe('buildComboMatches', () => {
     ];
     const result = buildComboMatches(predictions, new Set(['1']));
     expect(result.matches.map((m) => m.fixtureId)).toEqual([2, 3]);
+  });
+
+  test('with a league filter, ignores higher-probability matches outside that league', () => {
+    const predictions = [
+      fakePrediction({ id: 1, pick: '1 (Domicile)', home: 95, leagueId: 39 }), // Premier League, meilleure cote mais hors filtre
+      fakePrediction({ id: 2, pick: '1 (Domicile)', home: 60, leagueId: 1 }),  // Coupe du Monde
+      fakePrediction({ id: 3, pick: '1 (Domicile)', home: 55, leagueId: 1 }),  // Coupe du Monde
+    ];
+    const result = buildComboMatches(predictions, new Set(), 1);
+    expect(result.matches.map((m) => m.fixtureId)).toEqual([2, 3]);
+  });
+
+  test('with a league filter, returns null instead of falling back to other leagues', () => {
+    const predictions = [
+      fakePrediction({ id: 1, pick: '1 (Domicile)', home: 95, leagueId: 39 }),
+      fakePrediction({ id: 2, pick: '1 (Domicile)', home: 80, leagueId: 1 }), // un seul match CDM -> pas assez
+    ];
+    expect(buildComboMatches(predictions, new Set(), 1)).toBeNull();
   });
 });
 

@@ -31,6 +31,12 @@ const SPORTS = [
 
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN', 'AWD', 'WO'];
 
+// Coupe du Monde — même id que dans PRIORITY_LEAGUE_IDS (algorithm/predictor.js), vérifié
+// via l'API plutôt que sur le nom affiché (trop fragile, voir commentaire là-bas).
+// Les combinés foot doivent piocher exclusivement dans cette compétition, y compris hors
+// période de Coupe du Monde (pas de repli sur les autres ligues -> voir getOrCreateComboSeries).
+const WORLD_CUP_LEAGUE_ID = 1;
+
 function pickProbability(p) {
   const { home, draw = 0, away } = p.probabilities;
   if (p.recommendation.pick.startsWith('1')) return home;
@@ -38,15 +44,19 @@ function pickProbability(p) {
   return draw;
 }
 
-function isComboCandidate(p, usedIds) {
+function isComboCandidate(p, usedIds, leagueId) {
+  if (leagueId != null && p.fixture.leagueId !== leagueId) return false;
   return !p.error && !p.insufficientData && p.matchState !== 'finished' && p.probabilities && !usedIds.has(String(p.fixture.id));
 }
 
 // Choisit les 2 meilleurs matchs PAS DÉJÀ UTILISÉS dans un combiné précédent du même
-// sport/jour — pour ne jamais répéter exactement la même paire dans la même journée
-function buildComboMatches(predictions, usedIds) {
+// sport/jour — pour ne jamais répéter exactement la même paire dans la même journée.
+// leagueId (optionnel) restreint les candidats à une compétition précise (foot -> Coupe du
+// Monde uniquement, voir WORLD_CUP_LEAGUE_ID) : moins de 2 candidats dans cette ligue -> pas
+// de combiné du tout ce jour-là, volontairement pas de repli sur d'autres compétitions.
+function buildComboMatches(predictions, usedIds, leagueId) {
   const candidates = predictions
-    .filter((p) => isComboCandidate(p, usedIds))
+    .filter((p) => isComboCandidate(p, usedIds, leagueId))
     .map((p) => ({ p, prob: pickProbability(p) }))
     .sort((a, b) => b.prob - a.prob);
 
@@ -118,7 +128,8 @@ async function getOrCreateComboSeries(sport, date) {
   if (needsNewCombo) {
     const usedIds = new Set(stored.flatMap((row) => row.matches.map((m) => String(m.fixtureId))));
     const { results } = await sport.analyzeDay(date);
-    const built = buildComboMatches(results, usedIds);
+    const leagueFilter = sport.key === 'football' ? WORLD_CUP_LEAGUE_ID : undefined;
+    const built = buildComboMatches(results, usedIds, leagueFilter);
     if (built) {
       await saveCombo(date, sport.key, sport.label, built.matches, built.combinedProbability, built.risk);
       const matches = built.matches.map((m) => ({ ...m, finished: false, validated: null }));

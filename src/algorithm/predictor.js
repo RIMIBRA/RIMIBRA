@@ -394,6 +394,10 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
       id: fixtureId,
       date: fixture.fixture.date,
       league: `${fixture.league.name} — ${fixture.league.country}`,
+      // Id numérique de la ligue (pas le nom, trop fragile — voir PRIORITY_LEAGUE_IDS plus
+      // haut) -> permet à d'autres consommateurs (ex: combos.js) de filtrer par compétition
+      // précise sans se fier au texte affiché.
+      leagueId,
       home: homeTeam.name,
       away: awayTeam.name,
       homeLogo: homeTeam.logo,
