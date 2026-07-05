@@ -23,6 +23,31 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id, started_at DESC);
 
+-- Catalogue des offres payantes (durée + prix par plan) — séparé de `subscriptions` (qui reste
+-- "quel plan a CE user, jusqu'à quand") pour pouvoir facturer/afficher plusieurs durées par plan
+-- (ex: Premium 1 ou 2 semaines) sans dupliquer la logique d'accès (tiers.js ne connaît que
+-- 'free'/'premium'/'vip', jamais la durée choisie).
+CREATE TABLE IF NOT EXISTS subscription_plans (
+  id            SERIAL PRIMARY KEY,
+  plan          TEXT NOT NULL CHECK (plan IN ('premium', 'vip')),
+  duration_days INTEGER NOT NULL,
+  price_fcfa    INTEGER NOT NULL,
+  label         TEXT NOT NULL,
+  active        BOOLEAN NOT NULL DEFAULT true,
+  UNIQUE (plan, duration_days)
+);
+
+INSERT INTO subscription_plans (plan, duration_days, price_fcfa, label) VALUES
+  ('premium', 7, 500, 'Premium — 1 semaine'),
+  ('premium', 14, 1000, 'Premium — 2 semaines'),
+  ('vip', 14, 2500, 'VIP — 2 semaines'),
+  ('vip', 30, 5000, 'VIP — 30 jours')
+ON CONFLICT (plan, duration_days) DO NOTHING;
+
+-- Quelle offre précise a été achetée (utile pour les reçus/factures une fois le paiement réel
+-- branché) — nul pour un abonnement 'free' ou un changement de plan manuel sans offre associée.
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS plan_id INTEGER REFERENCES subscription_plans(id);
+
 -- Note : le cache des réponses API (cache-data.json) et le journal de quotas
 -- (cache-requests*.json) restent en fichiers pour l'instant — migration vers Postgres
 -- à faire séparément si besoin, ça touche ~13 fichiers de scrapers.

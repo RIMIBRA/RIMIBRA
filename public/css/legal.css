@@ -1,0 +1,50 @@
+.legal-page {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+
+.legal-box {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 2rem;
+  width: 100%;
+  max-width: 720px;
+  line-height: 1.6;
+}
+
+.legal-back {
+  display: inline-block;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 0.85rem;
+  margin-bottom: 1.5rem;
+}
+.legal-back:hover { color: var(--text); }
+
+.legal-box h1 { font-size: 1.4rem; margin-bottom: 1.5rem; }
+.legal-box section { margin-bottom: 1.75rem; }
+.legal-box h2 { font-size: 1rem; color: var(--blue); margin-bottom: 0.5rem; }
+.legal-box p, .legal-box ul { font-size: 0.9rem; color: var(--text); margin-bottom: 0.5rem; }
+.legal-box ul { padding-left: 1.25rem; }
+.legal-box a { color: var(--blue); }
+
+.legal-placeholder {
+  color: var(--yellow);
+  font-size: 0.82rem !important;
+  border-left: 2px solid var(--yellow);
+  padding-left: 0.6rem;
+}
+
+/* Bandeau disclaimer présent en bas de chaque page publique (voir index.html/login.html) */
+.disclaimer-banner {
+  text-align: center;
+  font-size: 0.7rem;
+  color: var(--muted);
+  padding: 0.75rem 1rem;
+  border-top: 1px solid var(--border);
+  margin-top: 1rem;
+}
+.disclaimer-banner a { color: var(--muted); }

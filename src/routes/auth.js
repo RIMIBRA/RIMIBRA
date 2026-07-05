@@ -2,6 +2,7 @@ const express = require('express');
 const bcrypt = require('bcrypt');
 const router = express.Router();
 const { createUser, findUserByEmail, getAuthInfo, setPlan } = require('../db/users');
+const subscriptionPlans = require('../db/subscriptionPlans');
 const { sign } = require('../auth/jwt');
 const { attachUser } = require('../auth/middleware');
 
@@ -51,15 +52,36 @@ router.get('/me', attachUser, async (req, res) => {
   res.json({ id: req.user.id, email: req.user.email, plan: req.user.plan, isAdmin: req.user.isAdmin });
 });
 
-// Changement de plan manuel pour l'instant (en attendant une vraie intégration Stripe/paiement)
+// Catalogue des offres payantes (durée + prix) — sert à construire l'écran de choix d'abonnement
+router.get('/plans', async (req, res) => {
+  try {
+    const plans = await subscriptionPlans.listActivePlans();
+    res.json({ plans });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ⚠️ Pas de paiement réel branché (FedaPay) pour l'instant — accepte directement planId sans
+// vérifier qu'un paiement a eu lieu, comme routes/ads.js pour les pubs. À gater derrière la
+// confirmation FedaPay (webhook signé) dès qu'elle existe ; ne pas laisser tel quel en prod.
 router.post('/subscribe', attachUser, async (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Non authentifié' });
-  const { plan } = req.body || {};
-  if (!['free', 'premium', 'vip'].includes(plan)) return res.status(400).json({ error: 'Plan invalide' });
+  const { plan, planId } = req.body || {};
 
-  const expiresAt = plan === 'free' ? null : new Date(Date.now() + 30 * 24 * 3600 * 1000);
-  const sub = await setPlan(req.user.id, plan, expiresAt);
-  res.json({ plan: sub.plan, expiresAt: sub.expires_at });
+  // Repasser gratuit ne correspond à aucune offre du catalogue (pas de durée/prix à choisir)
+  if (plan === 'free') {
+    const sub = await setPlan(req.user.id, 'free', null);
+    return res.json({ plan: sub.plan, expiresAt: sub.expires_at });
+  }
+
+  if (!planId) return res.status(400).json({ error: 'planId requis (voir GET /api/auth/plans)' });
+  const catalogPlan = await subscriptionPlans.getPlanById(planId);
+  if (!catalogPlan) return res.status(400).json({ error: 'Offre invalide' });
+
+  const expiresAt = new Date(Date.now() + catalogPlan.duration_days * 24 * 3600 * 1000);
+  const sub = await setPlan(req.user.id, catalogPlan.plan, expiresAt, catalogPlan.id);
+  res.json({ plan: sub.plan, expiresAt: sub.expires_at, planId: catalogPlan.id, priceFcfa: catalogPlan.price_fcfa });
 });
 
 module.exports = router;

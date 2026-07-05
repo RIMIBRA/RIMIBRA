@@ -43,14 +43,14 @@ async function getAuthInfo(userId) {
   return { plan, isAdmin: userRows[0]?.is_admin || false };
 }
 
-async function setPlan(userId, plan, expiresAt = null) {
+async function setPlan(userId, plan, expiresAt = null, planId = null) {
   await pool.query(
     "UPDATE subscriptions SET status = 'cancelled' WHERE user_id = $1 AND status = 'active'",
     [userId]
   );
   const { rows } = await pool.query(
-    'INSERT INTO subscriptions (user_id, plan, status, expires_at) VALUES ($1, $2, $3, $4) RETURNING *',
-    [userId, plan, 'active', expiresAt]
+    'INSERT INTO subscriptions (user_id, plan, status, expires_at, plan_id) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+    [userId, plan, 'active', expiresAt, planId]
   );
   return rows[0];
 }

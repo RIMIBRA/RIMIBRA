@@ -3,11 +3,13 @@
 // Chargé en <script> classique (pas de modules) : ces fonctions deviennent globales, à charger
 // avant app.js / admin.js.
 
-// Conseille un pari "victoire sèche" quand un résultat domine nettement,
-// sinon une "double chance" (deux issues combinées) quand le match est incertain.
-// Si le marché réel juge ce pari sec trop évident (cote très basse, voir alternativeBet
-// côté backend), l'alternative devient directement le conseil principal affiché — plus la
-// peine d'annoncer "Victoire sèche" pour la reléguer aussitôt en dessous.
+// Recommande l'issue la plus probable quand un résultat domine nettement, sinon une issue
+// combinée (deux résultats regroupés) quand le match est incertain.
+// Vocabulaire volontairement neutre/statistique (pas de "pari", "bookmaker", etc.) — conditions
+// Google AdSense/AdMob sur le contenu lié aux jeux d'argent, voir la revue de conformité.
+// Si le marché juge l'issue la plus probable trop évidente (cote très basse, voir
+// alternativeBet côté backend), l'alternative devient directement la recommandation
+// principale affichée — plus la peine de l'annoncer pour la reléguer aussitôt en dessous.
 function buildBetAdvice(p) {
   const { home, draw, away } = p.probabilities;
   const max = Math.max(home, draw, away);
@@ -16,25 +18,25 @@ function buildBetAdvice(p) {
     const obvious = home === max ? p.fixture.home : away === max ? p.fixture.away : 'Match nul';
     return {
       short: p.alternativeBet.alternative.market,
-      detail: `"Victoire sèche : ${obvious}" jugée trop évidente par le marché (cote ~${p.alternativeBet.mainPickOdd}) — alternative plus équilibrée, cote moyenne ${p.alternativeBet.alternative.odd}.`,
+      detail: `"${obvious}" jugé trop évident par le marché (cote ~${p.alternativeBet.mainPickOdd}) — alternative plus équilibrée, cote moyenne ${p.alternativeBet.alternative.odd}.`,
     };
   }
 
   if (max >= 50) {
-    const label = home === max ? `Victoire sèche : ${p.fixture.home}`
-      : away === max ? `Victoire sèche : ${p.fixture.away}`
+    const label = home === max ? p.fixture.home
+      : away === max ? p.fixture.away
       : 'Match nul';
-    return { short: label, detail: `Issue dominante (${max}%) — un pari simple semble justifié.` };
+    return { short: label, detail: `Issue dominante (${max}%) — un pronostic simple semble justifié.` };
   }
 
-  const doubleChances = [
-    { code: '1X', val: home + draw, label: `Double chance : ${p.fixture.home} ou match nul` },
-    { code: 'X2', val: draw + away, label: `Double chance : match nul ou ${p.fixture.away}` },
-    { code: '12', val: home + away, label: `Double chance : ${p.fixture.home} ou ${p.fixture.away} (sans nul)` },
+  const combinedOutcomes = [
+    { code: '1X', val: home + draw, label: `${p.fixture.home} ou match nul` },
+    { code: 'X2', val: draw + away, label: `Match nul ou ${p.fixture.away}` },
+    { code: '12', val: home + away, label: `${p.fixture.home} ou ${p.fixture.away} (sans nul)` },
   ].sort((a, b) => b.val - a.val);
-  const best = doubleChances[0];
+  const best = combinedOutcomes[0];
 
-  return { short: best.label, detail: `Match incertain (issue la plus probable à ${max}%) — une double chance (${best.val}%) est plus sûre qu'un pari sec.` };
+  return { short: best.label, detail: `Match incertain (issue la plus probable à ${max}%) — une issue combinée (${best.val}%) est statistiquement plus sûre qu'un pronostic tranché.` };
 }
 
 function bttsVerdict(gp) {
@@ -86,13 +88,13 @@ function buildModalContent(p) {
     </div>
 
     <div class="detail-section">
-      <h3>Conseil de pari</h3>
+      <h3>Recommandation statistique</h3>
       ${(() => {
         const advice = buildBetAdvice(p);
         const isAlternative = !!p.alternativeBet;
         return `
       <div class="stat-box" ${isAlternative ? 'style="border:1px solid var(--yellow)"' : ''}>
-        <div class="label">${isAlternative ? '⚠️ Meilleur choix (pari sec jugé trop évident)' : 'Issue du match'}</div>
+        <div class="label">${isAlternative ? '⚠️ Recommandation ajustée (issue la plus probable jugée trop évidente)' : 'Issue du match'}</div>
         <div class="value" style="color:${isAlternative ? 'var(--yellow)' : 'var(--blue)'};font-size:0.95rem">${advice.short}</div>
         <div style="font-size:0.75rem;color:var(--muted);margin-top:0.3rem">${advice.detail}</div>
       </div>`;
@@ -130,7 +132,7 @@ function buildModalContent(p) {
 
     ${p.odds ? `
     <div class="detail-section">
-      <h3>Cotes bookmaker</h3>
+      <h3>Probabilités du marché</h3>
       <div class="grid-2" style="grid-template-columns:1fr 1fr 1fr">
         <div class="stat-box"><div class="label">1 (Dom)</div><div class="value" style="color:var(--green)">${p.odds.home}</div></div>
         <div class="stat-box"><div class="label">X (Nul)</div><div class="value" style="color:var(--yellow)">${p.odds.draw}</div></div>
@@ -142,7 +144,7 @@ function buildModalContent(p) {
     <div class="detail-section ad-lock-section">
       <h3>🔒 Analyse complète verrouillée</h3>
       <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.75rem">
-        Score algorithmique, forme récente, tête-à-tête, blessures et cotes bookmaker sont réservés au plan VIP
+        Score algorithmique, forme récente, tête-à-tête, blessures et probabilités du marché sont réservés au plan VIP
         — débloquez-les gratuitement pour ce match en regardant une courte publicité.
       </p>
       <button class="ad-unlock-btn" data-sport="${p.sport || ''}" data-fixture-id="${p.fixture.id}">📺 Débloquer avec une pub</button>
@@ -156,7 +158,7 @@ function buildModalContent(p) {
     </div>` : `
     <div class="detail-section">
       <h3>Score algorithmique</h3>
-      <p style="font-size:0.8rem;color:var(--muted)">⚠️ Score non calculé — données API indisponibles pour ces équipes (quota épuisé ou données absentes). Seules les cotes bookmaker ont été utilisées pour la prédiction.</p>
+      <p style="font-size:0.8rem;color:var(--muted)">⚠️ Score non calculé — données API indisponibles pour ces équipes (quota épuisé ou données absentes). Seules les probabilités du marché ont été utilisées pour la prédiction.</p>
     </div>`}
 
     <div class="detail-section">
