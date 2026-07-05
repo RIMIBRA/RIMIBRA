@@ -53,12 +53,12 @@ describe('isComboCandidate', () => {
 
   test('rejects a prediction outside the requested league filter', () => {
     const p = fakePrediction({ id: 1, pick: '1 (Domicile)', leagueId: 39 }); // Premier League
-    expect(isComboCandidate(p, new Set(), 1)).toBe(false); // filtre = Coupe du Monde
+    expect(isComboCandidate(p, new Set(), new Set([1, 71, 667]))).toBe(false);
   });
 
   test('accepts a prediction matching the requested league filter', () => {
-    const p = fakePrediction({ id: 1, pick: '1 (Domicile)', leagueId: 1 });
-    expect(isComboCandidate(p, new Set(), 1)).toBe(true);
+    const p = fakePrediction({ id: 1, pick: '1 (Domicile)', leagueId: 71 }); // Brasileirão
+    expect(isComboCandidate(p, new Set(), new Set([1, 71, 667]))).toBe(true);
   });
 });
 
@@ -114,19 +114,28 @@ describe('buildComboMatches', () => {
   test('with a league filter, ignores higher-probability matches outside that league', () => {
     const predictions = [
       fakePrediction({ id: 1, pick: '1 (Domicile)', home: 95, leagueId: 39 }), // Premier League, meilleure cote mais hors filtre
-      fakePrediction({ id: 2, pick: '1 (Domicile)', home: 60, leagueId: 1 }),  // Coupe du Monde
-      fakePrediction({ id: 3, pick: '1 (Domicile)', home: 55, leagueId: 1 }),  // Coupe du Monde
+      fakePrediction({ id: 2, pick: '1 (Domicile)', home: 60, leagueId: 1 }),   // Coupe du Monde
+      fakePrediction({ id: 3, pick: '1 (Domicile)', home: 55, leagueId: 71 }), // Brasileirão
     ];
-    const result = buildComboMatches(predictions, new Set(), 1);
+    const result = buildComboMatches(predictions, new Set(), new Set([1, 71, 667]));
     expect(result.matches.map((m) => m.fixtureId)).toEqual([2, 3]);
+  });
+
+  test('with a league filter, mixes matches from several allowed leagues', () => {
+    const predictions = [
+      fakePrediction({ id: 1, pick: '1 (Domicile)', home: 70, leagueId: 667 }), // Amicaux de clubs
+      fakePrediction({ id: 2, pick: '1 (Domicile)', home: 65, leagueId: 71 }),  // Brasileirão
+    ];
+    const result = buildComboMatches(predictions, new Set(), new Set([1, 71, 667]));
+    expect(result.matches.map((m) => m.fixtureId)).toEqual([1, 2]);
   });
 
   test('with a league filter, returns null instead of falling back to other leagues', () => {
     const predictions = [
       fakePrediction({ id: 1, pick: '1 (Domicile)', home: 95, leagueId: 39 }),
-      fakePrediction({ id: 2, pick: '1 (Domicile)', home: 80, leagueId: 1 }), // un seul match CDM -> pas assez
+      fakePrediction({ id: 2, pick: '1 (Domicile)', home: 80, leagueId: 1 }), // un seul match dans les ligues autorisées -> pas assez
     ];
-    expect(buildComboMatches(predictions, new Set(), 1)).toBeNull();
+    expect(buildComboMatches(predictions, new Set(), new Set([1, 71, 667]))).toBeNull();
   });
 });
 

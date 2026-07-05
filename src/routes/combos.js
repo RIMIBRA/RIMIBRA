@@ -31,11 +31,15 @@ const SPORTS = [
 
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN', 'AWD', 'WO'];
 
-// Coupe du Monde — même id que dans PRIORITY_LEAGUE_IDS (algorithm/predictor.js), vérifié
-// via l'API plutôt que sur le nom affiché (trop fragile, voir commentaire là-bas).
-// Les combinés foot doivent piocher exclusivement dans cette compétition, y compris hors
-// période de Coupe du Monde (pas de repli sur les autres ligues -> voir getOrCreateComboSeries).
-const WORLD_CUP_LEAGUE_ID = 1;
+// Coupe du Monde, championnat brésilien et amicaux de clubs — ids vérifiés via l'API plutôt
+// que sur le nom affiché (trop fragile, voir commentaire dans algorithm/predictor.js).
+// Les combinés foot doivent piocher exclusivement dans ces compétitions, sans repli sur les
+// autres ligues même hors période de Coupe du Monde (voir getOrCreateComboSeries).
+const FOOTBALL_COMBO_LEAGUE_IDS = new Set([
+  1,   // Coupe du Monde
+  71,  // Brasileirão Série A (Brésil)
+  667, // Amicaux de clubs
+]);
 
 function pickProbability(p) {
   const { home, draw = 0, away } = p.probabilities;
@@ -44,19 +48,20 @@ function pickProbability(p) {
   return draw;
 }
 
-function isComboCandidate(p, usedIds, leagueId) {
-  if (leagueId != null && p.fixture.leagueId !== leagueId) return false;
+function isComboCandidate(p, usedIds, leagueIds) {
+  if (leagueIds && !leagueIds.has(p.fixture.leagueId)) return false;
   return !p.error && !p.insufficientData && p.matchState !== 'finished' && p.probabilities && !usedIds.has(String(p.fixture.id));
 }
 
 // Choisit les 2 meilleurs matchs PAS DÉJÀ UTILISÉS dans un combiné précédent du même
 // sport/jour — pour ne jamais répéter exactement la même paire dans la même journée.
-// leagueId (optionnel) restreint les candidats à une compétition précise (foot -> Coupe du
-// Monde uniquement, voir WORLD_CUP_LEAGUE_ID) : moins de 2 candidats dans cette ligue -> pas
-// de combiné du tout ce jour-là, volontairement pas de repli sur d'autres compétitions.
-function buildComboMatches(predictions, usedIds, leagueId) {
+// leagueIds (optionnel, un Set) restreint les candidats à un ensemble de compétitions précis
+// (foot -> Coupe du Monde + championnat brésilien + amicaux de clubs, voir
+// FOOTBALL_COMBO_LEAGUE_IDS) : moins de 2 candidats dans ces ligues -> pas de combiné du tout
+// ce jour-là, volontairement pas de repli sur d'autres compétitions.
+function buildComboMatches(predictions, usedIds, leagueIds) {
   const candidates = predictions
-    .filter((p) => isComboCandidate(p, usedIds, leagueId))
+    .filter((p) => isComboCandidate(p, usedIds, leagueIds))
     .map((p) => ({ p, prob: pickProbability(p) }))
     .sort((a, b) => b.prob - a.prob);
 
@@ -128,7 +133,7 @@ async function getOrCreateComboSeries(sport, date) {
   if (needsNewCombo) {
     const usedIds = new Set(stored.flatMap((row) => row.matches.map((m) => String(m.fixtureId))));
     const { results } = await sport.analyzeDay(date);
-    const leagueFilter = sport.key === 'football' ? WORLD_CUP_LEAGUE_ID : undefined;
+    const leagueFilter = sport.key === 'football' ? FOOTBALL_COMBO_LEAGUE_IDS : undefined;
     const built = buildComboMatches(results, usedIds, leagueFilter);
     if (built) {
       await saveCombo(date, sport.key, sport.label, built.matches, built.combinedProbability, built.risk);
