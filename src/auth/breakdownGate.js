@@ -1,7 +1,8 @@
 const { canUseFeature } = require('./tiers');
 const adUnlocks = require('../db/adUnlocks');
 
-// Le détail complet (forme, H2H, blessures, classement, cotes) est réservé au plan VIP —
+// Un utilisateur gratuit ne voit QUE les probabilités et la recommandation — tout le reste
+// (prédiction de buts, détail complet, probabilités du marché) est réservé au plan premium/vip,
 // sauf si l'utilisateur a débloqué CE match précis contre une pub récompensée (voir
 // routes/ads.js). Utilisé par chaque route de détail de match (une par sport) juste avant
 // de renvoyer l'analyse au client.
@@ -18,9 +19,10 @@ async function applyBreakdownGate(analysis, req, sport) {
     return { ...analysis, sport };
   }
 
-  // Vue tronquée : pronostic/probabilités/prédiction de buts restent visibles, le détail
-  // (breakdown) et les cotes bookmaker (odds) — explicitement VIP, voir tiers.js — sont retirés
-  const { breakdown, odds, ...rest } = analysis;
+  // Vue tronquée : seuls le pronostic et les probabilités 1X2 restent visibles. Prédiction de
+  // buts, détail (breakdown) et probabilités du marché (odds) — réservés au premium/vip,
+  // voir tiers.js — sont retirés.
+  const { breakdown, odds, goalPrediction, ...rest } = analysis;
   return { ...rest, sport, breakdownLocked: true };
 }
 

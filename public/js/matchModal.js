@@ -144,8 +144,8 @@ function buildModalContent(p) {
     <div class="detail-section ad-lock-section">
       <h3>🔒 Analyse complète verrouillée</h3>
       <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.75rem">
-        Score algorithmique, forme récente, tête-à-tête, blessures et probabilités du marché sont réservés au plan VIP
-        — débloquez-les gratuitement pour ce match en regardant une courte publicité.
+        Prédiction de buts, score algorithmique, forme récente, tête-à-tête, blessures et probabilités du marché
+        sont réservés aux abonnés Premium et VIP — débloquez-les gratuitement pour ce match en regardant une courte publicité.
       </p>
       <button class="ad-unlock-btn" data-sport="${p.sport || ''}" data-fixture-id="${p.fixture.id}">📺 Débloquer avec une pub</button>
     </div>

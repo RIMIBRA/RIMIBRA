@@ -1,7 +1,9 @@
 // Règles d'accès par plan d'abonnement.
-// 'free'    : foot uniquement, vue limitée (pas de détail/cotes/breakdown complet)
-// 'premium' : foot + tous les sports d'équipe (NFL, Basketball, Hockey, Baseball, Handball)
-// 'vip'     : tout premium + détails complets (breakdown, cotes, recherche)
+// 'free'    : foot uniquement, vue très limitée (probabilités + recommandation seulement —
+//             ni prédiction de buts, ni détail complet, ni cotes ; débloquable par pub, voir
+//             breakdownGate.js)
+// 'premium' : foot + tous les sports d'équipe, ET détail complet débloqué automatiquement
+// 'vip'     : tout premium + recherche + combinés illimités
 const TIER_RANK = { free: 0, premium: 1, vip: 2 };
 
 const SPORT_MIN_TIER = {
@@ -16,7 +18,7 @@ const SPORT_MIN_TIER = {
 
 const FEATURE_MIN_TIER = {
   search: 'premium',
-  fullBreakdown: 'vip',
+  fullBreakdown: 'premium',
 };
 
 function hasAccess(userPlan, requiredTier) {
