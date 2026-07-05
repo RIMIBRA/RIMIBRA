@@ -283,7 +283,7 @@ async function loadPredictions(date, { force = false } = {}) {
       errorBox.style.background = 'rgba(88,166,255,0.1)';
       errorBox.style.borderColor = 'var(--blue)';
       errorBox.style.color = 'var(--blue)';
-      errorBox.textContent = '🔒 Aperçu gratuit : seuls les matchs des grandes équipes sélectionnées sont visibles. Passe Premium pour tout voir.';
+      errorBox.textContent = '🔒 Aperçu gratuit : 5 matchs à venir visibles (tous les résultats terminés restent accessibles). Passe Premium pour tout voir.';
       errorBox.classList.remove('hidden');
     } else if (data.limitReached && currentUserIsAdmin) {
       // Detail interne (quota API) -> reserve au fondateur, un visiteur normal n'en a pas besoin

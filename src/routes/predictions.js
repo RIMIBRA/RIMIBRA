@@ -4,7 +4,7 @@ const { analyzeDayFixtures, analyzeFixture, searchFixtures } = require('../algor
 const api = require('../api/client');
 const oddsapi = require('../scraper/oddsapi');
 const { requireFeature, requireAdmin } = require('../auth/middleware');
-const { isFreePreviewMatch } = require('../auth/tiers');
+const { FREE_PREVIEW_LIMIT } = require('../auth/tiers');
 const { applyBreakdownGate } = require('../auth/breakdownGate');
 
 // "Trop évident" se juge sur la VRAIE cote bookmaker, jamais sur la confiance de notre propre
@@ -55,10 +55,12 @@ router.get('/today', async (req, res) => {
 
     const plan = req.user?.plan || 'free';
     const isFreeTier = plan === 'free' && !req.user?.isAdmin;
-    // Plan gratuit : aperçu limité à une sélection d'équipes populaires, pour donner envie de passer premium
-    // (les admins voient tout, sans filtre, même si leur plan en base est "free")
+    // Plan gratuit : aperçu limité aux FREE_PREVIEW_LIMIT meilleurs matchs à venir/en cours
+    // (déjà triés par confiance dans analyzeDayFixtures) — les matchs terminés restent tous
+    // visibles (résultat déjà connu, pas un contenu à vendre). Les admins voient tout, sans
+    // filtre, même si leur plan en base est "free".
     const visibleResults = isFreeTier
-      ? results.filter((r) => r.finished || isFreePreviewMatch(r.fixture.home, r.fixture.away))
+      ? [...results.filter((r) => !r.finished).slice(0, FREE_PREVIEW_LIMIT), ...results.filter((r) => r.finished)]
       : results;
 
     res.json({

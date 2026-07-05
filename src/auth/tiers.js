@@ -41,23 +41,10 @@ function comboLimitFor(userPlan, isAdmin) {
   return COMBO_LIMIT_BY_PLAN[userPlan] ?? 0;
 }
 
-// Le plan gratuit ne voit que les matchs impliquant cette sélection d'équipes — à ajuster
-// librement (popularité, marché visé...), ce n'est qu'un point de départ.
-const FREE_PREVIEW_TEAMS = [
-  'real madrid', 'barcelona', 'manchester united', 'manchester city',
-  'liverpool', 'paris saint germain', 'bayern munich', 'juventus',
-  'chelsea', 'arsenal',
-];
-
-function normalizeTeamName(name) {
-  return (name || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim();
-}
-
-function isFreePreviewMatch(homeName, awayName) {
-  const home = normalizeTeamName(homeName);
-  const away = normalizeTeamName(awayName);
-  return FREE_PREVIEW_TEAMS.some((t) => home.includes(t) || away.includes(t));
-}
+// Le plan gratuit ne voit qu'un nombre limité de matchs à venir/en cours (les mieux notés,
+// l'ordre de tri par confiance est déjà fait en amont) — simple à comprendre, contrairement à
+// une sélection par nom d'équipe qui pouvait laisser voir 0 ou 20 matchs selon les jours.
+const FREE_PREVIEW_LIMIT = 5;
 
 module.exports = {
   TIER_RANK,
@@ -66,7 +53,6 @@ module.exports = {
   hasAccess,
   canAccessSport,
   canUseFeature,
-  FREE_PREVIEW_TEAMS,
-  isFreePreviewMatch,
+  FREE_PREVIEW_LIMIT,
   comboLimitFor,
 };
