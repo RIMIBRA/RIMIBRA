@@ -23,6 +23,12 @@ const accountStatus = document.getElementById('account-status');
 // en cache pour un visiteur anonyme (ou un autre plan) resterait servie après connexion/changement de plan
 let currentUserKey = 'anon';
 
+// Infos de plan côté client, pour masquer aux visiteurs tout ce qui est purement interne
+// (quotas API, "X analysés sur Y") — ça ne les aide pas, ça ne fait que soulever des questions.
+// Seul le fondateur (admin) a besoin de voir ces détails ; il a de toute façon le dashboard pour ça.
+let currentUserIsAdmin = false;
+let canSearch = false; // premium/vip/admin uniquement — voir auth/tiers.js FEATURE_MIN_TIER.search
+
 // L'email vient de l'inscription utilisateur — jamais de confiance avant affichage HTML
 function escapeHtml(str) {
   return String(str ?? '').replace(/[&<>"']/g, (c) => ({
@@ -34,10 +40,15 @@ async function renderAccountStatus() {
   const user = await fetchCurrentUser();
   if (!user) {
     currentUserKey = 'anon';
+    currentUserIsAdmin = false;
+    canSearch = false;
     accountStatus.innerHTML = '<a href="/login.html">Se connecter</a>';
     return;
   }
   currentUserKey = `u${user.id}_${user.isAdmin ? 'admin' : user.plan}`;
+  currentUserIsAdmin = !!user.isAdmin;
+  canSearch = user.isAdmin || user.plan === 'premium' || user.plan === 'vip';
+  document.getElementById('api-badge').classList.toggle('hidden', !currentUserIsAdmin);
   const planLabel = user.isAdmin ? 'Admin' : ({ free: 'Gratuit', premium: 'Premium', vip: 'VIP' }[user.plan] || user.plan);
   const dashboardLink = user.isAdmin ? '<a href="/admin.html" id="dashboard-link">🛠️ Dashboard</a>' : '';
   accountStatus.innerHTML = `<span class="plan-${user.isAdmin ? 'admin' : user.plan}">${escapeHtml(user.email)} · ${planLabel}</span> ${dashboardLink} <a href="#" id="logout-link">Déconnexion</a>`;
@@ -274,7 +285,8 @@ async function loadPredictions(date, { force = false } = {}) {
       errorBox.style.color = 'var(--blue)';
       errorBox.textContent = '🔒 Aperçu gratuit : seuls les matchs des grandes équipes sélectionnées sont visibles. Passe Premium pour tout voir.';
       errorBox.classList.remove('hidden');
-    } else if (data.limitReached) {
+    } else if (data.limitReached && currentUserIsAdmin) {
+      // Detail interne (quota API) -> reserve au fondateur, un visiteur normal n'en a pas besoin
       errorBox.style.background = 'rgba(210,153,34,0.1)';
       errorBox.style.borderColor = 'var(--yellow)';
       errorBox.style.color = 'var(--yellow)';
@@ -395,9 +407,12 @@ function renderGrid(predictions) {
       <span class="top-banner-sub">Classés par confiance puis probabilité maximale · ${buckets.upcoming.length + buckets.live.length} matchs analysés au total</span>
     </div>` : '';
 
-  const coverageNote = lastMeta.total > lastMeta.analyzed ? `
+  // Le detail (quota API, nombre de matchs traites) est purement interne -> sans interet pour
+  // un visiteur. Seul ce qui l'aide concrètement (où trouver un match manquant) est montré,
+  // et seulement à ceux qui peuvent effectivement s'en servir (recherche = premium/vip/admin).
+  const coverageNote = (lastMeta.total > lastMeta.analyzed && canSearch) ? `
     <p style="grid-column:1/-1;font-size:0.78rem;color:var(--muted);margin-bottom:0.75rem">
-      ℹ️ ${lastMeta.analyzed} matchs analysés en détail sur ${lastMeta.total} disponibles aujourd'hui — la limite quotidienne de l'API restreint le nombre de matchs traités (les plus suivis par les bookmakers sont priorisés). D'autres rencontres (amicaux, compétitions mineures) peuvent ne pas apparaître ici. Utilisez la recherche pour les retrouver.
+      🔍 Vous ne trouvez pas un match ? Cherchez l'équipe que vous voulez dans la barre de recherche.
     </p>` : '';
 
   const sections = [];
@@ -422,6 +437,7 @@ function renderGrid(predictions) {
 }
 
 function updateApiStatus(used, remaining) {
+  if (!currentUserIsAdmin) return; // détail interne, sans intérêt pour un visiteur normal
   const badge = document.getElementById('api-badge');
   const total = used + remaining;
   badge.textContent = `API: ${used}/${total} requêtes`;
