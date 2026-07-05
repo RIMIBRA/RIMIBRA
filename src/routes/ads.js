@@ -14,14 +14,24 @@ router.post('/unlock', async (req, res) => {
     return res.status(401).json({ error: 'Connexion requise pour débloquer via publicité.' });
   }
 
-  const { sport, fixtureId } = req.body || {};
-  if (!VALID_SPORTS.has(sport) || !fixtureId) {
-    return res.status(400).json({ error: 'Paramètres "sport" et "fixtureId" requis.' });
+  const { sport, fixtureId, level } = req.body || {};
+  if (!VALID_SPORTS.has(sport) || !fixtureId || !adUnlocks.LEVELS.includes(level)) {
+    return res.status(400).json({ error: 'Paramètres "sport", "fixtureId" et "level" requis.' });
   }
 
   try {
-    await adUnlocks.recordUnlock(req.user.id, sport, fixtureId);
-    res.json({ unlocked: true });
+    const plan = req.user.plan || 'free';
+    const requiredViews = adUnlocks.requiredViewsFor(plan, level);
+    if (requiredViews == null) {
+      return res.status(400).json({ error: 'Ce niveau est déjà inclus dans votre abonnement, ou non disponible par pub pour votre plan.' });
+    }
+
+    const progress = await adUnlocks.recordView(req.user.id, sport, fixtureId, level, requiredViews);
+    res.json({
+      viewsCount: progress.views_count,
+      viewsRequired: requiredViews,
+      unlocked: !!progress.unlocked_at,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

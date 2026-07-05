@@ -121,17 +121,36 @@ CREATE INDEX IF NOT EXISTS idx_prediction_results_unresolved
 CREATE INDEX IF NOT EXISTS idx_prediction_results_predicted_at
   ON prediction_results(sport, predicted_at);
 
--- Déblocage du détail complet (breakdown : forme, H2H, blessures, cotes — normalement réservé
--- au plan VIP, voir tiers.js) contre le visionnage d'une pub récompensée, match par match,
--- pour un utilisateur gratuit/premium. Persistant : un match déjà débloqué le reste (pas de
--- nouvelle pub à chaque fois qu'on rouvre le même match).
+-- Déblocage match par match contre le visionnage de pubs récompensées, à deux niveaux (voir
+-- tiers.js et auth/breakdownGate.js) :
+--   'premium_details' = prédiction de buts (normalement incluse dès le plan premium)
+--   'vip_details'     = détail complet : forme, H2H, blessures, classement, probabilités du
+--                       marché (normalement inclus uniquement au plan VIP)
+-- Le nombre de vues requises dépend du plan actuel de l'utilisateur (voir db/adUnlocks.js
+-- requiredViewsFor) : plus l'écart avec le plan qui inclut déjà ce niveau est grand, plus il
+-- faut de vues. views_count progresse à chaque pub vue ; unlocked_at ne se remplit qu'une fois
+-- le seuil atteint, et reste acquis ensuite (jamais remis à zéro).
 CREATE TABLE IF NOT EXISTS ad_unlocks (
   id          SERIAL PRIMARY KEY,
   user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   sport       TEXT NOT NULL,
   fixture_id  TEXT NOT NULL,
-  unlocked_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  UNIQUE (user_id, sport, fixture_id)
+  level       TEXT NOT NULL DEFAULT 'vip_details' CHECK (level IN ('premium_details', 'vip_details')),
+  views_count INTEGER NOT NULL DEFAULT 0,
+  unlocked_at TIMESTAMPTZ,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX IF NOT EXISTS idx_ad_unlocks_lookup ON ad_unlocks(user_id, sport, fixture_id);
+-- Idempotent : migre une table existante créée sous l'ancien schéma (un seul niveau,
+-- débloqué dès la première pub vue) sans perdre les lignes déjà là.
+ALTER TABLE ad_unlocks ADD COLUMN IF NOT EXISTS level TEXT NOT NULL DEFAULT 'vip_details';
+ALTER TABLE ad_unlocks ADD COLUMN IF NOT EXISTS views_count INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE ad_unlocks ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE ad_unlocks ALTER COLUMN unlocked_at DROP NOT NULL;
+ALTER TABLE ad_unlocks DROP CONSTRAINT IF EXISTS ad_unlocks_user_id_sport_fixture_id_key;
+
+-- Un index unique (pas une contrainte nommée) pour pouvoir le recréer sans erreur à chaque
+-- migration (CREATE CONSTRAINT n'a pas d'équivalent IF NOT EXISTS fiable) ; sert aussi de
+-- cible à ON CONFLICT côté application.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ad_unlocks_user_sport_fixture_level
+  ON ad_unlocks(user_id, sport, fixture_id, level);

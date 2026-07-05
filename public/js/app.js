@@ -509,19 +509,27 @@ modalBackdrop.addEventListener('click', () => modal.classList.add('hidden'));
 modalContent.addEventListener('click', async (e) => {
   const btn = e.target.closest('.ad-unlock-btn');
   if (!btn) return;
-  const { sport, fixtureId } = btn.dataset;
+  const { sport, fixtureId, level } = btn.dataset;
+  const viewsRequired = parseInt(btn.dataset.viewsRequired, 10);
+  const originalLabel = `📺 Débloquer avec une pub (${btn.dataset.viewsDone}/${viewsRequired})`;
 
   showRewardedAd(async () => {
     btn.disabled = true;
     btn.textContent = 'Déblocage…';
     try {
-      await unlockBreakdown(sport, fixtureId);
-      const res = await fetch(singleMatchEndpoint(fixtureId), { headers: authHeaders() });
-      const fresh = await res.json();
-      modalContent.innerHTML = buildModalContent(fresh);
+      const progress = await recordAdView(sport, fixtureId, level);
+      if (progress.unlocked) {
+        const res = await fetch(singleMatchEndpoint(fixtureId), { headers: authHeaders() });
+        const fresh = await res.json();
+        modalContent.innerHTML = buildModalContent(fresh);
+      } else {
+        btn.dataset.viewsDone = progress.viewsCount;
+        btn.disabled = false;
+        btn.textContent = `📺 Débloquer avec une pub (${progress.viewsCount}/${progress.viewsRequired})`;
+      }
     } catch (err) {
       btn.disabled = false;
-      btn.textContent = '📺 Débloquer avec une pub';
+      btn.textContent = originalLabel;
       alert('Déblocage impossible : ' + err.message);
     }
   });

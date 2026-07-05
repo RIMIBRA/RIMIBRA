@@ -32,9 +32,15 @@ describe('canUseFeature', () => {
     expect(canUseFeature('premium', 'search')).toBe(true);
   });
 
-  test('fullBreakdown requires premium (free must unlock via ad, see breakdownGate.js)', () => {
+  test('goalPrediction requires premium (free must unlock via ad, see breakdownGate.js)', () => {
+    expect(canUseFeature('free', 'goalPrediction')).toBe(false);
+    expect(canUseFeature('premium', 'goalPrediction')).toBe(true);
+    expect(canUseFeature('vip', 'goalPrediction')).toBe(true);
+  });
+
+  test('fullBreakdown requires vip (free/premium must unlock via ad)', () => {
     expect(canUseFeature('free', 'fullBreakdown')).toBe(false);
-    expect(canUseFeature('premium', 'fullBreakdown')).toBe(true);
+    expect(canUseFeature('premium', 'fullBreakdown')).toBe(false);
     expect(canUseFeature('vip', 'fullBreakdown')).toBe(true);
   });
 });

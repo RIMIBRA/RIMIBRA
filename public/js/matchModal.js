@@ -57,6 +57,21 @@ function renderFormBadges(details) {
   return details.map((d) => `<span class="form-badge ${d.result}" title="${d.opponent}: ${d.scored}-${d.conceded}">${d.result}</span>`).join('');
 }
 
+// Encart de déblocage par pub — deux instances possibles par match : 'premium_details'
+// (prédiction de buts) et 'vip_details' (détail complet), chacune avec son propre nombre de
+// vues requises selon le plan de l'utilisateur (voir auth/breakdownGate.js côté serveur).
+function adLockBox(level, viewsRequired, sport, fixtureId, title, description) {
+  if (viewsRequired == null) return ''; // pas de déblocage par pub prévu pour ce plan/niveau (ex: vip qui a déjà tout)
+  return `
+    <div class="detail-section ad-lock-section">
+      <h3>🔒 ${title}</h3>
+      <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.75rem">${description}</p>
+      <button class="ad-unlock-btn" data-level="${level}" data-sport="${sport || ''}" data-fixture-id="${fixtureId}" data-views-required="${viewsRequired}" data-views-done="0">
+        📺 Débloquer avec une pub (0/${viewsRequired})
+      </button>
+    </div>`;
+}
+
 function buildModalContent(p) {
   if (p.error) return `<p style="color:var(--red)">${p.error}</p>`;
   const b = p.breakdown;
@@ -113,6 +128,12 @@ function buildModalContent(p) {
       </div>` : ''}
     </div>
 
+    ${p.goalPredictionLocked ? adLockBox(
+      'premium_details', p.goalPredictionViewsRequired, p.sport, p.fixture.id,
+      'Prédiction de buts verrouillée',
+      'Réservée aux abonnés Premium et VIP — débloquez-la gratuitement pour ce match en regardant des publicités.'
+    ) : ''}
+
     ${p.goalPrediction ? `
     <div class="detail-section">
       <h3>Analyse des buts</h3>
@@ -140,16 +161,11 @@ function buildModalContent(p) {
       </div>
     </div>` : ''}
 
-    ${p.breakdownLocked ? `
-    <div class="detail-section ad-lock-section">
-      <h3>🔒 Analyse complète verrouillée</h3>
-      <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.75rem">
-        Prédiction de buts, score algorithmique, forme récente, tête-à-tête, blessures et probabilités du marché
-        sont réservés aux abonnés Premium et VIP — débloquez-les gratuitement pour ce match en regardant une courte publicité.
-      </p>
-      <button class="ad-unlock-btn" data-sport="${p.sport || ''}" data-fixture-id="${p.fixture.id}">📺 Débloquer avec une pub</button>
-    </div>
-    ` : `
+    ${p.breakdownLocked ? adLockBox(
+      'vip_details', p.breakdownViewsRequired, p.sport, p.fixture.id,
+      'Analyse complète verrouillée',
+      'Score algorithmique, forme récente, tête-à-tête, blessures et probabilités du marché sont réservés aux abonnés VIP — débloquez-les gratuitement pour ce match en regardant des publicités.'
+    ) : `
     ${!p.noApiData ? `
     <div class="detail-section">
       <h3>Score algorithmique</h3>

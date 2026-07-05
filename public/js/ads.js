@@ -38,13 +38,15 @@ function showRewardedAd(onComplete, onCancel) {
   });
 }
 
-// Appelle le serveur pour enregistrer le déblocage une fois la pub "vue" — voir
-// routes/ads.js pour l'avertissement sur l'absence de vérification serveur réelle (SSV).
-async function unlockBreakdown(sport, fixtureId) {
+// Appelle le serveur pour enregistrer UNE vue de pub pour ce niveau ('premium_details' ou
+// 'vip_details' — voir db/adUnlocks.js) une fois la pub "vue". Renvoie la progression
+// (viewsCount/viewsRequired/unlocked) — voir routes/ads.js pour l'avertissement sur l'absence
+// de vérification serveur réelle (SSV).
+async function recordAdView(sport, fixtureId, level) {
   const res = await fetch('/api/ads/unlock', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
-    body: JSON.stringify({ sport, fixtureId }),
+    body: JSON.stringify({ sport, fixtureId, level }),
   });
   if (!res.ok) throw new Error((await res.json()).error || 'Déblocage impossible');
   return res.json();

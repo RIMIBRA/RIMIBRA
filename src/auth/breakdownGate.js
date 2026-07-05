@@ -1,29 +1,41 @@
 const { canUseFeature } = require('./tiers');
 const adUnlocks = require('../db/adUnlocks');
 
-// Un utilisateur gratuit ne voit QUE les probabilités et la recommandation — tout le reste
-// (prédiction de buts, détail complet, probabilités du marché) est réservé au plan premium/vip,
-// sauf si l'utilisateur a débloqué CE match précis contre une pub récompensée (voir
-// routes/ads.js). Utilisé par chaque route de détail de match (une par sport) juste avant
-// de renvoyer l'analyse au client.
+// Deux niveaux de contenu verrouillé, chacun débloquable soit par le plan d'abonnement, soit
+// match par match contre un nombre de pubs vues qui dépend du plan actuel (voir tiers.js et
+// db/adUnlocks.js) :
+//   - 'premium_details' (prédiction de buts)          -> inclus dès le plan premium
+//   - 'vip_details' (breakdown complet + cotes marché) -> inclus uniquement au plan vip
+// Utilisé par chaque route de détail de match (une par sport) juste avant de renvoyer
+// l'analyse au client.
 async function applyBreakdownGate(analysis, req, sport) {
   if (!analysis || analysis.error) return analysis;
+  if (req.user?.isAdmin) return { ...analysis, sport };
 
   const plan = req.user?.plan || 'free';
-  if (req.user?.isAdmin || canUseFeature(plan, 'fullBreakdown')) {
-    return { ...analysis, sport };
-  }
-
   const fixtureId = analysis.fixture?.id;
-  if (req.user && fixtureId && (await adUnlocks.hasUnlocked(req.user.id, sport, fixtureId))) {
-    return { ...analysis, sport };
+  const result = { ...analysis, sport };
+
+  if (!canUseFeature(plan, 'goalPrediction')) {
+    const unlocked = !!(req.user && fixtureId && await adUnlocks.isUnlocked(req.user.id, sport, fixtureId, 'premium_details'));
+    if (!unlocked) {
+      delete result.goalPrediction;
+      result.goalPredictionLocked = true;
+      result.goalPredictionViewsRequired = adUnlocks.requiredViewsFor(plan, 'premium_details');
+    }
   }
 
-  // Vue tronquée : seuls le pronostic et les probabilités 1X2 restent visibles. Prédiction de
-  // buts, détail (breakdown) et probabilités du marché (odds) — réservés au premium/vip,
-  // voir tiers.js — sont retirés.
-  const { breakdown, odds, goalPrediction, ...rest } = analysis;
-  return { ...rest, sport, breakdownLocked: true };
+  if (!canUseFeature(plan, 'fullBreakdown')) {
+    const unlocked = !!(req.user && fixtureId && await adUnlocks.isUnlocked(req.user.id, sport, fixtureId, 'vip_details'));
+    if (!unlocked) {
+      delete result.breakdown;
+      delete result.odds;
+      result.breakdownLocked = true;
+      result.breakdownViewsRequired = adUnlocks.requiredViewsFor(plan, 'vip_details');
+    }
+  }
+
+  return result;
 }
 
 module.exports = { applyBreakdownGate };
