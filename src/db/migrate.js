@@ -18,9 +18,16 @@ async function migrate() {
   }
 }
 
-migrate().catch((err) => {
-  // err.message est parfois vide selon le type d'erreur réseau/pg — logguer l'objet complet
-  // pour ne pas se retrouver sans aucune piste dans les logs de déploiement.
-  console.error('Erreur de migration:', err);
-  process.exit(1);
-});
+// Appelé directement (npm run migrate) : exécute et quitte avec le bon code de sortie.
+// Importé depuis server.js : ce bloc ne s'exécute pas (require.main !== module), seule la
+// fonction migrate() est utilisée, sans jamais appeler process.exit depuis le process serveur.
+if (require.main === module) {
+  migrate().catch((err) => {
+    // err.message est parfois vide selon le type d'erreur réseau/pg — logguer l'objet complet
+    // pour ne pas se retrouver sans aucune piste dans les logs de déploiement.
+    console.error('Erreur de migration:', err);
+    process.exit(1);
+  });
+}
+
+module.exports = { migrate };

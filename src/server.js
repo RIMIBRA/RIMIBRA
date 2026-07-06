@@ -5,6 +5,7 @@ const rateLimit = require('express-rate-limit');
 const path = require('path');
 const { attachUser, requireSportAccess, requireAdmin } = require('./auth/middleware');
 const { trackExtraFixturesForData, resolveRecentResults } = require('./algorithm/predictor');
+const { migrate } = require('./db/migrate');
 
 // Filet de sécurité : loggue au lieu de laisser Node tuer tout le process. Sans process
 // manager (pas de PM2/Docker ici) un crash veut dire arrêt total jusqu'à relance manuelle —
@@ -60,6 +61,12 @@ app.get('*', (req, res) => {
 app.listen(PORT, () => {
   console.log(`Football Predictor démarré sur http://localhost:${PORT}`);
 });
+
+// Lancée APRÈS l'ouverture du port, jamais avant : le schéma est idempotent (CREATE TABLE IF
+// NOT EXISTS...) donc quelques requêtes peuvent en théorie arriver avant la fin de la
+// migration, mais ça évite qu'un hébergeur comme Render déclare le déploiement en échec faute
+// d'avoir vu le port s'ouvrir à temps si la migration traîne.
+migrate().catch((err) => console.error('Échec de la migration au démarrage (ignoré) :', err));
 
 // Alimente prediction_results avec des matchs au-delà de la sélection affichée aux visiteurs
 // (voir trackExtraFixturesForData), pour accumuler plus vite les données de calibration —
