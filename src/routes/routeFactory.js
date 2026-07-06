@@ -1,7 +1,8 @@
 const express = require('express');
 const { requireAdmin } = require('../auth/middleware');
+const { applyBreakdownGate } = require('../auth/breakdownGate');
 
-function createSportRoutes({ api, predictor }) {
+function createSportRoutes({ api, predictor, sport }) {
   const router = express.Router();
 
   router.get('/today', async (req, res) => {
@@ -41,7 +42,7 @@ function createSportRoutes({ api, predictor }) {
       const game = await api.getGameById(req.params.id);
       if (!game) return res.status(404).json({ error: 'Match introuvable' });
       const analysis = await predictor.analyzeGame(game);
-      res.json(analysis);
+      res.json(await applyBreakdownGate(analysis, req, sport));
     } catch (err) {
       res.status(500).json({ error: err.message });
     }

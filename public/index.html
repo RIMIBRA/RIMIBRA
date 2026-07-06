@@ -5,13 +5,15 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Football Predictor</title>
   <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/legal.css">
+  <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-7163648440213554" crossorigin="anonymous"></script>
 </head>
 <body>
   <header>
     <div class="header-inner">
       <h1 id="app-title">⚽ Football Predictor</h1>
       <div class="api-status">
-        <span id="api-badge">Chargement...</span>
+        <span id="api-badge" class="hidden">Chargement...</span>
         <span id="account-status"></span>
       </div>
     </div>
@@ -64,6 +66,10 @@
     </div>
 
     <div id="predictions-grid"></div>
+
+    <!-- Emplacement bannière AdSense — à remplacer par le <ins class="adsbygoogle"> réel une
+         fois le compte approuvé (voir css/style.css .ad-banner-placeholder) -->
+    <div class="ad-banner-placeholder">Emplacement publicitaire (bannière)</div>
   </main>
 
   <div id="modal" class="hidden">
@@ -74,7 +80,16 @@
     </div>
   </div>
 
+  <footer class="disclaimer-banner">
+    footpredictongoal est un site de statistiques et d'analyses sportives. Les prédictions sont des
+    probabilités mathématiques et ne constituent en aucun cas une incitation au jeu. Jouer comporte des risques.
+    · <a href="/mentions-legales.html">Mentions légales</a>
+    · <a href="/politique-confidentialite.html">Politique de confidentialité</a>
+  </footer>
+
   <script src="/js/auth.js"></script>
+  <script src="/js/matchModal.js"></script>
+  <script src="/js/ads.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>

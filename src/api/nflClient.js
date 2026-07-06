@@ -21,7 +21,10 @@ async function apiGet(endpoint, params = {}, ttlOverride = null) {
   if (cached) return cached;
 
   const used = cache.getDailyRequestCount(NAMESPACE);
-  if (used >= DAILY_LIMIT) return [];
+  if (used >= DAILY_LIMIT) {
+    cache.warnOnceIfQuotaReached(NAMESPACE, used, DAILY_LIMIT);
+    return [];
+  }
 
   const response = await axios.get(`${BASE_URL}${endpoint}`, {
     headers: { 'x-apisports-key': process.env.API_FOOTBALL_KEY },
@@ -92,14 +95,19 @@ async function getH2H(team1Id, team2Id, count = 10) {
   return sortByDateDesc(all).slice(0, count);
 }
 
-// Pas de mapping fiable classement/blessures NFL -> format foot sans vérification des champs réels ;
-// retourne vide pour l'instant (le predictor redistribue le poids sur forme + H2H).
+// Pas de mapping fiable classement NFL -> format foot sans vérification des champs réels ;
+// retourne vide pour l'instant (le predictor redistribue le poids sur forme + H2H + blessures).
 async function getStandings() {
   return [];
 }
 
-async function getInjuries() {
-  return [];
+// Contrairement au foot, cet endpoint n'est PAS filtrable par match (pas de paramètre
+// fixture/game côté fournisseur — vérifié directement, "The Game/Fixture field do not
+// exist") : c'est le rapport blessures courant de toute l'équipe, à interroger par équipe.
+// Pas d'endpoint "lineups" pour ce sport chez ce fournisseur (vérifié aussi) -> pas de
+// confirmation possible via la composition officielle, contrairement au foot.
+async function getInjuries(teamId) {
+  return apiGet('/injuries', { team: teamId });
 }
 
 async function getRawGames(date) {

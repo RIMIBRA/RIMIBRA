@@ -2,7 +2,7 @@ const api = require('../api/client');
 const { analyzeForm } = require('./form');
 const { analyzeH2H } = require('./h2h');
 const { analyzeStandings } = require('./standings');
-const { analyzeInjuries } = require('./injuries');
+const { analyzeInjuries, refineWithLineups } = require('./injuries');
 const { calcGoalPrediction } = require('./goals');
 const scraper = require('../scraper/index');
 const footballpred = require('../scraper/footballpred');
@@ -13,6 +13,8 @@ const soccerway = require('../scraper/soccerway');
 const { normalize, expandSearchTerms } = require('./teamAliases');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const cache = require('../cache/db');
+const predictionResults = require('../db/predictionResults');
+const calibration = require('./calibration');
 
 // L'analyse complète d'une journée (jusqu'à 200s) est mise en cache 2 minutes : le premier
 // visiteur paie le coût une fois, tous les suivants dans cette fenêtre ont une réponse quasi
@@ -20,13 +22,33 @@ const cache = require('../cache/db');
 const FULL_ANALYSIS_TTL = 12 * 60; // 12 min : bon compromis vitesse/fraîcheur des statuts en direct
 
 const HOME_ADVANTAGE = 6;
+// Nombre de matchs analysés (et donc affichés) pour un visiteur -> garde le chargement rapide.
 const MAX_FIXTURES_PER_DAY = 30;
 // Les matchs s'analysent en parallèle (pas un par un) — limité pour ne pas saturer le
 // navigateur Puppeteer partagé ni déclencher de blocage anti-bot sur les sites scrapés
 const ANALYSIS_CONCURRENCY = 10;
+// Volume supplémentaire suivi en tâche de fond (voir trackExtraFixturesForData) uniquement pour
+// nourrir plus vite prediction_results — jamais exposé à un visiteur, donc sans impact sur le
+// temps de chargement. Concurrence volontairement basse : tourne pendant que de vrais visiteurs
+// utilisent peut-être le même navigateur Puppeteer partagé, ne doit jamais leur faire concurrence.
+const BACKGROUND_TRACKING_LIMIT = 150;
+const BACKGROUND_CONCURRENCY = 3;
 const MAX_SEARCH_RESULTS = 5;
 const UPCOMING_STATUSES = ['NS', 'TBD', '1H', 'HT', '2H'];
 const LIVE_STATUSES = ['1H', 'HT', '2H'];
+
+// Le fournisseur ne publie la composition officielle que ~20-75 min avant le coup d'envoi,
+// jamais avant -> inutile (et coûteux en quota) de l'interroger en dehors de cette fenêtre,
+// elle reviendrait systématiquement vide. Marge incluse des deux côtés (avant : certaines
+// ligues publient un peu plus tôt ; après : reste utile en tout début de match).
+const LINEUP_LOOKAHEAD_MINUTES = 90;
+const LINEUP_LOOKBEHIND_MINUTES = 30;
+
+function isLineupWindow(kickoffIso) {
+  if (!kickoffIso) return false;
+  const minutesUntilKickoff = (new Date(kickoffIso).getTime() - Date.now()) / 60000;
+  return minutesUntilKickoff <= LINEUP_LOOKAHEAD_MINUTES && minutesUntilKickoff >= -LINEUP_LOOKBEHIND_MINUTES;
+}
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN', 'AWD', 'WO'];
 
 // Trois états pour permettre un filtre Terminés / En cours / À venir côté interface.
@@ -101,6 +123,40 @@ function buildFinishedEntry(f) {
   };
 }
 
+// Complète les pronostics pris quand ces matchs étaient encore "upcoming" — sans ré-analyser
+// (le score final suffit). Idempotent : resolvePrediction ignore les matchs déjà résolus ou
+// jamais pronostiqués (hors sélection, quota épuisé ce jour-là...).
+function resolveFinishedFixtures(finishedFixtures) {
+  for (const f of finishedFixtures) {
+    if (f.goals?.home != null && f.goals?.away != null) {
+      predictionResults
+        .resolvePrediction('football', f.fixture.id, f.goals.home, f.goals.away)
+        .catch((err) => console.error('Échec résolution pronostic (ignoré):', err.message));
+    }
+  }
+}
+
+// Résout les résultats indépendamment de toute visite : sans ça, un match ne se résout QUE
+// si un visiteur recharge /today pour sa date après le coup de sifflet final. Si le site est
+// resté silencieux (coupure serveur, faible trafic la nuit) ou que le match a basculé sur le
+// jour suivant, ces pronostics restaient bloqués "à venir" pour toujours. Couvre hier + aujourd'hui
+// pour rattraper un serveur resté éteint pendant la fin d'une journée de matchs.
+async function resolveRecentResults() {
+  const today = new Date();
+  const yesterday = new Date(today.getTime() - 24 * 3600 * 1000);
+  const dates = [yesterday, today].map((d) => d.toISOString().split('T')[0]);
+
+  for (const date of dates) {
+    try {
+      const fixtures = await api.getFixturesByDate(date);
+      const finishedFixtures = fixtures.filter((f) => FINISHED_STATUSES.includes(f.fixture.status.short));
+      resolveFinishedFixtures(finishedFixtures);
+    } catch (err) {
+      console.error(`Échec résolution des résultats du ${date} (ignoré):`, err.message);
+    }
+  }
+}
+
 // Compétitions jeunes / réserves : peu suivies (pas de cotes, pas d'historique exploitable),
 // on les laisse passer en dernier pour privilégier les rencontres avec de vraies données
 const MINOR_PATTERN = /\bU1[5-9]\b|\bU2[0-3]\b|\bYouth\b|\bJunior(?:s)?\b|\bReserves?\b|\bPrimavera\b|\bII\b/i;
@@ -139,6 +195,21 @@ function isPriorityLeague(fixture) {
   return PRIORITY_LEAGUE_IDS.has(fixture.league.id);
 }
 
+// Trie les matchs à analyser en priorité : les rencontres "suivies" (cotes bookmaker,
+// footballpredictions) passent devant, et les compétitions jeunes/réserves/obscures
+// (qui n'ont ni historique ni cotes exploitables → analyse "données insuffisantes")
+// sont reléguées en fin de liste, pour laisser la place aux matchs vraiment intéressants
+// (ex : amicaux de sélections nationales avant une Coupe du Monde)
+function fixtureRank(f, oddsapiList, fpredList) {
+  let score = 0;
+  // Coupe du Monde et grands championnats : priorité forte, ce sont les pronostics les plus fiables
+  if (isPriorityLeague(f)) score += 10;
+  if (oddsapi.findMatch(oddsapiList, f.teams.home.name, f.teams.away.name)) score += 2;
+  if (footballpred.isInFpred(fpredList, f.teams.home.name, f.teams.away.name)) score += 1;
+  if (isLikelyMinor(f)) score -= 3;
+  return score;
+}
+
 function calcWeights(standingsAvailable) {
   if (standingsAvailable) {
     return { form: 0.35, standings: 0.25, h2h: 0.25, injuries: 0.15 };
@@ -166,6 +237,20 @@ function calcProbabilities(homeScore, awayScore) {
   };
 }
 
+// Extrait pour être réutilisé sur les probabilités brutes de l'algo (avant blend) — sert à
+// enregistrer algoPick dans prediction_results et mesurer si le blend aide vraiment (voir
+// algorithm/calibration.js), en appliquant exactement la même règle de décision.
+function pickFromProbabilities(probs, homeScore, awayScore) {
+  let pick;
+  if (probs.home >= probs.away && probs.home >= probs.draw) pick = '1 (Domicile)';
+  else if (probs.away >= probs.home && probs.away >= probs.draw) pick = '2 (Extérieur)';
+  else pick = 'X (Nul)';
+
+  if (probs.draw > 28 && Math.abs(homeScore - awayScore) < 8) pick = 'X (Nul)';
+
+  return pick;
+}
+
 function getRecommendation(probs, homeScore, awayScore, webSources, insufficientData) {
   if (insufficientData) {
     return { pick: 'Analyse non disponible', confidence: 'Faible' };
@@ -179,14 +264,7 @@ function getRecommendation(probs, homeScore, awayScore, webSources, insufficient
   else if (diff > 10) confidence = hasWebData ? 'Élevée' : 'Moyenne';
   else confidence = hasWebData ? 'Moyenne' : 'Faible';
 
-  let pick;
-  if (probs.home >= probs.away && probs.home >= probs.draw) pick = '1 (Domicile)';
-  else if (probs.away >= probs.home && probs.away >= probs.draw) pick = '2 (Extérieur)';
-  else pick = 'X (Nul)';
-
-  if (probs.draw > 28 && Math.abs(homeScore - awayScore) < 8) pick = 'X (Nul)';
-
-  return { pick, confidence };
+  return { pick: pickFromProbabilities(probs, homeScore, awayScore), confidence };
 }
 
 function hasNoData(formHome, formAway, h2h) {
@@ -198,7 +276,7 @@ function hasNoData(formHome, formAway, h2h) {
   );
 }
 
-async function analyzeFixture(fixture, fpredList = null, forebetList = null, oddsapiList = null) {
+async function analyzeFixture(fixture, fpredList = null, forebetList = null, oddsapiList = null, { featured = true } = {}) {
   const homeTeam = fixture.teams.home;
   const awayTeam = fixture.teams.away;
   const leagueId = fixture.league.id;
@@ -214,6 +292,10 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
     !footballpred.isInFpred(fpredList, homeTeam.name, awayTeam.name)
   );
 
+  // Composition officielle : seulement dans sa fenêtre de publication (voir isLineupWindow),
+  // sinon le fournisseur renvoie systématiquement vide -> pas la peine de payer l'appel.
+  const shouldFetchLineups = isLineupWindow(fixture.fixture.date);
+
   // API + enrichissement web en parallèle (fpredList déjà récupéré, pas de re-fetch)
   const [apiResults, webSources] = await Promise.allSettled([
     Promise.allSettled([
@@ -222,11 +304,12 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
       api.getH2H(homeTeam.id, awayTeam.id, 10),
       api.getStandings(leagueId, season),
       api.getInjuries(fixtureId),
+      shouldFetchLineups ? api.getLineups(fixtureId) : Promise.resolve(null),
     ]).then((results) => results.map((r) => (r.status === 'fulfilled' ? r.value : null))),
     scraper.enrichFixture(homeTeam.name, awayTeam.name, date, fpredList, forebetList, oddsapiList, minor),
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : null)));
 
-  const [homeFixtures, awayFixtures, h2hFixtures, standingsData, injuriesData] = apiResults || [null, null, null, null, null];
+  const [homeFixtures, awayFixtures, h2hFixtures, standingsData, injuriesData, lineupsData] = apiResults || [null, null, null, null, null, null];
   const web = webSources || {};
 
   let formHome = analyzeForm(homeFixtures, homeTeam.id);
@@ -246,7 +329,10 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
   if (swAway) formAway = swAway;
   const h2h = analyzeH2H(h2hFixtures, homeTeam.id, awayTeam.id);
   const standings = analyzeStandings(standingsData, homeTeam.id, awayTeam.id);
-  const injuries = analyzeInjuries(injuriesData, homeTeam.id, awayTeam.id);
+  const injuriesBase = analyzeInjuries(injuriesData, homeTeam.id, awayTeam.id);
+  // Affine avec la composition confirmée si elle est disponible (voir shouldFetchLineups) —
+  // un joueur listé blessé/incertain qui apparaît quand même dans le groupe n'est plus pénalisé.
+  const injuries = lineupsData ? refineWithLineups(injuriesBase, lineupsData, homeTeam.id, awayTeam.id) : injuriesBase;
 
   const weights = calcWeights(standings.available);
 
@@ -279,19 +365,60 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
   // Quand l'algo n'a pas de données réelles (forme/H2H vides), ne pas le compter double
   // dans le blend — laisser les cotes bookmaker (oddsapi) exprimer leur signal sans être
   // noyées par le bruit 50/50 des valeurs par défaut de l'algo
-  const finalProbs = scraper.blendProbabilities(algoProbs, web, !noApiData);
+  // blendWeights : recalculés depuis prediction_results (algorithm/calibration.js) — poids
+  // par défaut tant qu'il n'y a pas assez de pronostics résolus pour calibrer
+  const blendWeights = calibration.getWeights();
+  const finalProbs = scraper.blendProbabilities(algoProbs, web, !noApiData, blendWeights);
   const recommendation = getRecommendation(finalProbs, homeScore, awayScore, web, insufficientData);
+  const algoPick = pickFromProbabilities(algoProbs, homeScore, awayScore);
   const goalPrediction = calcGoalPrediction(formHome, formAway);
   const matchState = matchStateFor(fixture.fixture.status.short, fixture.fixture.date);
   const validation = matchState === 'finished'
     ? computeValidation(recommendation.pick, fixture.goals?.home, fixture.goals?.away, goalPrediction)
     : null;
 
+  const webSourceFlags = {
+    footballpred: !!web.footballpred,
+    forebet: !!web.forebet,
+    besoccer: !!web.besoccer,
+    oddsapi: !!web.oddsapi,
+    flashscore: !!web.flashscore,
+    soccerway: formHome.source === 'soccerway' || formAway.source === 'soccerway',
+  };
+
+  // Uniquement les vrais pronostics pris avant le match (pas "Analyse non disponible", pas
+  // en direct) -> sert à mesurer plus tard, via /admin/prediction-accuracy, si les poids de
+  // l'algo et le blend avec les sources externes sont réellement fiables.
+  if (matchState === 'upcoming' && !insufficientData) {
+    predictionResults
+      .recordPrediction({
+        sport: 'football',
+        fixtureId,
+        league: `${fixture.league.name} — ${fixture.league.country}`,
+        homeTeam: homeTeam.name,
+        awayTeam: awayTeam.name,
+        predictedPick: recommendation.pick,
+        confidence: recommendation.confidence,
+        probabilities: finalProbs,
+        algoPick,
+        algoProbabilities: algoProbs,
+        goalPrediction,
+        sources: webSourceFlags,
+        noApiData,
+        featured,
+      })
+      .catch((err) => console.error('Échec enregistrement pronostic (ignoré):', err.message));
+  }
+
   return {
     fixture: {
       id: fixtureId,
       date: fixture.fixture.date,
       league: `${fixture.league.name} — ${fixture.league.country}`,
+      // Id numérique de la ligue (pas le nom, trop fragile — voir PRIORITY_LEAGUE_IDS plus
+      // haut) -> permet à d'autres consommateurs (ex: combos.js) de filtrer par compétition
+      // précise sans se fier au texte affiché.
+      leagueId,
       home: homeTeam.name,
       away: awayTeam.name,
       homeLogo: homeTeam.logo,
@@ -309,14 +436,7 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
     noApiData,
     insufficientData,
     webMode: false,
-    webSources: {
-      footballpred: !!web.footballpred,
-      forebet: !!web.forebet,
-      besoccer: !!web.besoccer,
-      oddsapi: !!web.oddsapi,
-      flashscore: !!web.flashscore,
-      soccerway: formHome.source === 'soccerway' || formAway.source === 'soccerway',
-    },
+    webSources: webSourceFlags,
     odds: web.oddsapi?.rawOdds || web.flashscore?.rawOdds || null,
     breakdown: {
       form: { home: formHome, away: formAway },
@@ -348,9 +468,10 @@ async function analyzeDayFixturesUncached(date) {
     oddsapi.getTodayOdds().catch(() => []),
   ]);
   const upcoming = fixtures.filter((f) => UPCOMING_STATUSES.includes(f.fixture.status.short));
-  const finished = fixtures
-    .filter((f) => FINISHED_STATUSES.includes(f.fixture.status.short))
-    .map(buildFinishedEntry);
+  const finishedFixtures = fixtures.filter((f) => FINISHED_STATUSES.includes(f.fixture.status.short));
+  const finished = finishedFixtures.map(buildFinishedEntry);
+
+  resolveFinishedFixtures(finishedFixtures);
 
   const apiLimited = api.getDailyRequestCount() >= api.DAILY_LIMIT;
 
@@ -366,22 +487,7 @@ async function analyzeDayFixturesUncached(date) {
     return { ...webResult, results: [...webResult.results, ...finished] };
   }
 
-  // Trier les matchs à analyser en priorité : les rencontres "suivies" (cotes bookmaker,
-  // footballpredictions) passent devant, et les compétitions jeunes/réserves/obscures
-  // (qui n'ont ni historique ni cotes exploitables → analyse "données insuffisantes")
-  // sont reléguées en fin de liste, pour laisser la place aux matchs vraiment intéressants
-  // (ex : amicaux de sélections nationales avant une Coupe du Monde)
-  function fixtureRank(f) {
-    let score = 0;
-    // Coupe du Monde et grands championnats : priorité forte, ce sont les pronostics les plus fiables
-    if (isPriorityLeague(f)) score += 10;
-    if (oddsapi.findMatch(oddsapiList, f.teams.home.name, f.teams.away.name)) score += 2;
-    if (footballpred.isInFpred(fpredList, f.teams.home.name, f.teams.away.name)) score += 1;
-    if (isLikelyMinor(f)) score -= 3;
-    return score;
-  }
-
-  upcoming.sort((a, b) => fixtureRank(b) - fixtureRank(a));
+  upcoming.sort((a, b) => fixtureRank(b, oddsapiList, fpredList) - fixtureRank(a, oddsapiList, fpredList));
 
   const toAnalyze = upcoming.slice(0, MAX_FIXTURES_PER_DAY);
 
@@ -416,6 +522,47 @@ async function analyzeDayFixturesUncached(date) {
   });
 
   return { results: [...results, ...finished], total: upcoming.length, analyzed: toAnalyze.length };
+}
+
+let backgroundTrackingRunning = false;
+
+// Analyse des matchs AU-DELÀ des MAX_FIXTURES_PER_DAY affichés à un visiteur, uniquement pour
+// enregistrer leur pronostic dans prediction_results (voir analyzeFixture) et accélérer la
+// collecte de données de calibration — jamais appelée depuis une requête HTTP, donc aucun
+// visiteur n'attend sur ce travail. Concurrence volontairement réduite (BACKGROUND_CONCURRENCY)
+// pour ne pas ralentir de vrais visiteurs qui utiliseraient le navigateur Puppeteer partagé
+// au même moment.
+async function trackExtraFixturesForData(date) {
+  if (backgroundTrackingRunning) return; // déjà en cours -> ne pas empiler un second passage
+  backgroundTrackingRunning = true;
+  try {
+    const [fixtures, fpredList, forebetList, oddsapiList] = await Promise.all([
+      api.getFixturesByDate(date),
+      footballpred.getTodayPredictions(date).catch(() => []),
+      forebet.getTodayPredictions(date).catch(() => []),
+      oddsapi.getTodayOdds().catch(() => []),
+    ]);
+
+    if (api.getDailyRequestCount() >= api.DAILY_LIMIT) return; // quota épuisé -> rien à faire de plus
+
+    const upcoming = fixtures.filter((f) => UPCOMING_STATUSES.includes(f.fixture.status.short));
+    upcoming.sort((a, b) => fixtureRank(b, oddsapiList, fpredList) - fixtureRank(a, oddsapiList, fpredList));
+    // Les MAX_FIXTURES_PER_DAY premiers sont déjà couverts par le flux normal -> ne pas les refaire
+    const extra = upcoming.slice(MAX_FIXTURES_PER_DAY, BACKGROUND_TRACKING_LIMIT);
+
+    await mapWithConcurrency(extra, BACKGROUND_CONCURRENCY, async (fixture) => {
+      try {
+        await analyzeFixture(fixture, fpredList, forebetList, oddsapiList, { featured: false });
+      } catch {
+        // Un match en échec ici ne doit pas interrompre les autres -> simplement pas de
+        // pronostic enregistré pour celui-là cette fois-ci
+      }
+    });
+  } catch (err) {
+    console.error('Suivi arrière-plan des pronostics (ignoré):', err.message);
+  } finally {
+    backgroundTrackingRunning = false;
+  }
 }
 
 function fixtureMatchesQuery(fixture, terms) {
@@ -470,4 +617,6 @@ module.exports = {
   matchStateFor,
   computeValidation,
   isLikelyMinor,
+  trackExtraFixturesForData,
+  resolveRecentResults,
 };

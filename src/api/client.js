@@ -16,6 +16,10 @@ const TTL = {
   form: 12 * 3600,
   injuries: 12 * 3600,
   leagues: 24 * 3600,
+  // Le fournisseur republie la composition environ toutes les 15 min une fois disponible
+  // (~20-75 min avant le coup d'envoi, jamais avant) -> TTL court pour rester à jour dans
+  // cette fenêtre, sans non plus retaper l'API à chaque appel.
+  lineups: 10 * 60,
 };
 
 async function apiGet(endpoint, params = {}, ttlOverride = null) {
@@ -26,6 +30,7 @@ async function apiGet(endpoint, params = {}, ttlOverride = null) {
 
   const used = cache.getDailyRequestCount();
   if (used >= DAILY_LIMIT) {
+    cache.warnOnceIfQuotaReached('football', used, DAILY_LIMIT);
     return []; // Retourner tableau vide plutôt que bloquer toute l'app
   }
 
@@ -66,6 +71,13 @@ async function getInjuries(fixtureId) {
   return apiGet('/injuries', { fixture: fixtureId });
 }
 
+// Composition officielle — le fournisseur ne la publie que ~20-75 min avant le coup
+// d'envoi (jamais avant) ; ttlOverride explicite car "/fixtures/lineups" contient "fixtures"
+// et matcherait sinon à tort la TTL de 6h prévue pour les fixtures normales.
+async function getLineups(fixtureId) {
+  return apiGet('/fixtures/lineups', { fixture: fixtureId }, TTL.lineups);
+}
+
 async function getActiveLeagues() {
   return apiGet('/leagues', { current: true });
 }
@@ -81,6 +93,7 @@ module.exports = {
   getH2H,
   getStandings,
   getInjuries,
+  getLineups,
   getActiveLeagues,
   getFixtureById,
   getDailyRequestCount: cache.getDailyRequestCount,

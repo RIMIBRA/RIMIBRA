@@ -4,11 +4,18 @@ const cache = require('../cache/db');
 
 const BASE_URL = 'https://api.api-tennis.com/tennis/';
 const NAMESPACE = 'tennis';
-// Plan Entreprise : 200 000 appels/jour — actif via l'essai gratuit de 14 jours.
-// ⚠️ Repasse cette valeur à un plan inférieur (ou vérifie le nouveau quota) une fois
-// l'essai terminé, sinon l'app pensera avoir encore beaucoup de marge alors que ce
-// ne sera plus le cas.
-const DAILY_LIMIT = 200000;
+// Plan Entreprise : 200 000 appels/jour — actif via l'essai gratuit de 14 jours démarré le
+// 2026-06-28 (date du premier appel loggé). Passé TRIAL_ENDS, on retombe automatiquement sur
+// un quota conservateur pour ne pas continuer à taper comme si la marge de 200k existait encore
+// (ce qui ferait planter les appels réels une fois l'essai terminé sans que rien ne le signale).
+// Ajuste POST_TRIAL_LIMIT dès que le vrai plan payant est connu, ou fixe API_TENNIS_DAILY_LIMIT
+// dans .env pour forcer une valeur (prioritaire sur tout le reste).
+const TRIAL_ENDS = new Date('2026-07-12T00:00:00Z').getTime();
+const TRIAL_LIMIT = 200000;
+const POST_TRIAL_LIMIT = 100;
+const DAILY_LIMIT = process.env.API_TENNIS_DAILY_LIMIT
+  ? parseInt(process.env.API_TENNIS_DAILY_LIMIT, 10)
+  : (Date.now() < TRIAL_ENDS ? TRIAL_LIMIT : POST_TRIAL_LIMIT);
 
 const GAMES_TODAY_TTL = 5 * 60; // court : statut sensible au temps (NS/live/Finished)
 const DEFAULT_TTL = 6 * 3600;
@@ -19,14 +26,24 @@ async function apiGet(method, params = {}, ttlOverride = null) {
   if (cached) return cached;
 
   const used = cache.getDailyRequestCount(NAMESPACE);
-  if (used >= DAILY_LIMIT) return [];
+  if (used >= DAILY_LIMIT) {
+    cache.warnOnceIfQuotaReached(NAMESPACE, used, DAILY_LIMIT);
+    return [];
+  }
 
   const response = await axios.get(BASE_URL, {
     params: { method, APIkey: process.env.API_TENNIS_KEY, ...params },
   });
 
   cache.logRequest(method, NAMESPACE);
-  const data = response.data?.result ?? [];
+  const raw = response.data?.result ?? [];
+  // event_key/statuts pèsent quelques centaines d'octets ; pointbypoint et statistics (jamais
+  // lus par normalizeFixture) pèsent ~35Ko PAR MATCH -> avec 500+ matchs/jour ça a fait grossir
+  // cache-data.json à 111Mo, réécrit en entier et en synchrone à chaque set() (voir cache/db.js),
+  // ce qui bloquait l'event loop de tout le serveur, pas seulement le tennis.
+  const data = Array.isArray(raw)
+    ? raw.map(({ pointbypoint, statistics, ...rest }) => rest)
+    : raw;
   cache.set(cacheKey, data, ttlOverride ?? DEFAULT_TTL);
   return data;
 }

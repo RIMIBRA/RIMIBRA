@@ -6,6 +6,7 @@ const PRIORITY_LEAGUE_IDS = new Set([57, 35, 47]);
 
 module.exports = createTeamSportPredictor({
   api,
+  sport: 'hockey',
   leagueLabel: 'Hockey',
   homeAdvantage: 5,
   allowDraw: false, // prolongation/tirs au but en NHL, pas de match nul

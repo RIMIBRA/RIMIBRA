@@ -4,18 +4,16 @@ const { analyzeDayFixtures, analyzeFixture, searchFixtures } = require('../algor
 const api = require('../api/client');
 const oddsapi = require('../scraper/oddsapi');
 const { requireFeature, requireAdmin } = require('../auth/middleware');
-const { isFreePreviewMatch } = require('../auth/tiers');
+const { FREE_PREVIEW_LIMIT } = require('../auth/tiers');
+const { applyBreakdownGate } = require('../auth/breakdownGate');
 
-// Seuil au-delà duquel le pari "vainqueur sec" est jugé trop évident (cote proche de 1.0)
-const OBVIOUS_PICK_THRESHOLD = 80;
+// "Trop évident" se juge sur la VRAIE cote bookmaker, jamais sur la confiance de notre propre
+// algo : les deux peuvent diverger fortement (notre modèle peut être à 68% alors que le marché
+// est à une cote de 1.02, quasi certain) — se fier au modèle ferait passer à côté de
+// l'alternative dans exactement le cas où elle est la plus utile.
+const OBVIOUS_ODD_MAX = 1.6;
 const ALTERNATIVE_ODD_MIN = 1.3;
 const ALTERNATIVE_ODD_MAX = 6;
-
-function pickProbability(p) {
-  if (p.recommendation.pick.startsWith('1')) return p.probabilities.home;
-  if (p.recommendation.pick.startsWith('2')) return p.probabilities.away;
-  return p.probabilities.draw;
-}
 
 function pickAlternativeFromTotals(totals) {
   if (!totals) return null;
@@ -30,17 +28,18 @@ function pickAlternativeFromTotals(totals) {
 // Coûte 1 requête the-odds-api supplémentaire — appelé uniquement ici (détail d'un match
 // précis), jamais pour la liste du jour entière, pour ne pas exploser le quota mensuel.
 async function buildAlternativeBet(fixture, analysis) {
-  if (analysis.matchState === 'finished' || pickProbability(analysis) < OBVIOUS_PICK_THRESHOLD) return null;
+  if (analysis.matchState === 'finished') return null;
   try {
     const oddsList = await oddsapi.getTodayOdds();
     const match = oddsapi.findMatch(oddsList, fixture.teams.home.name, fixture.teams.away.name);
     if (!match) return null;
-    const totals = await oddsapi.getMatchTotals(match.id, match.leagueKey);
-    const alternative = pickAlternativeFromTotals(totals);
-    if (!alternative) return null;
     const mainPickOdd = analysis.recommendation.pick.startsWith('1') ? match.rawOdds.home
       : analysis.recommendation.pick.startsWith('2') ? match.rawOdds.away
       : match.rawOdds.draw;
+    if (mainPickOdd == null || mainPickOdd > OBVIOUS_ODD_MAX) return null; // le marché ne juge pas ce pick "évident" -> pas d'alternative à proposer
+    const totals = await oddsapi.getMatchTotals(match.id, match.leagueKey);
+    const alternative = pickAlternativeFromTotals(totals);
+    if (!alternative) return null;
     return { mainPickOdd, alternative };
   } catch {
     return null;
@@ -56,10 +55,12 @@ router.get('/today', async (req, res) => {
 
     const plan = req.user?.plan || 'free';
     const isFreeTier = plan === 'free' && !req.user?.isAdmin;
-    // Plan gratuit : aperçu limité à une sélection d'équipes populaires, pour donner envie de passer premium
-    // (les admins voient tout, sans filtre, même si leur plan en base est "free")
+    // Plan gratuit : aperçu limité aux FREE_PREVIEW_LIMIT meilleurs matchs à venir/en cours
+    // (déjà triés par confiance dans analyzeDayFixtures) — les matchs terminés restent tous
+    // visibles (résultat déjà connu, pas un contenu à vendre). Les admins voient tout, sans
+    // filtre, même si leur plan en base est "free".
     const visibleResults = isFreeTier
-      ? results.filter((r) => r.finished || isFreePreviewMatch(r.fixture.home, r.fixture.away))
+      ? [...results.filter((r) => !r.finished).slice(0, FREE_PREVIEW_LIMIT), ...results.filter((r) => r.finished)]
       : results;
 
     res.json({
@@ -99,7 +100,7 @@ router.get('/fixture/:id', async (req, res) => {
     if (!fixture) return res.status(404).json({ error: 'Match introuvable' });
     const analysis = await analyzeFixture(fixture);
     const alternativeBet = await buildAlternativeBet(fixture, analysis);
-    res.json({ ...analysis, alternativeBet });
+    res.json(await applyBreakdownGate({ ...analysis, alternativeBet }, req, 'football'));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

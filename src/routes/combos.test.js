@@ -1,13 +1,19 @@
-const { pickProbability, isComboCandidate, buildComboMatches, summarize, addDays } = require('./combos');
+const { pickProbability, isComboCandidate, buildComboMatches, summarize, addDays, hasMediaCoverage, footballComboRank } = require('./combos');
 
-function fakePrediction({ id, pick, home = 60, draw = 20, away = 20, finished = false, error = false, insufficientData = false }) {
+function fakePrediction({
+  id, pick, home = 60, draw = 20, away = 20, finished = false, error = false, insufficientData = false,
+  leagueId, btts, h2hBttsRate, webSources,
+}) {
   return {
-    fixture: { id },
+    fixture: { id, leagueId },
     recommendation: { pick, confidence: 'Moyenne' },
     probabilities: { home, draw, away },
     matchState: finished ? 'finished' : 'upcoming',
     error,
     insufficientData,
+    goalPrediction: btts != null ? { btts } : undefined,
+    breakdown: h2hBttsRate != null ? { h2h: { bttsRate: h2hBttsRate } } : undefined,
+    webSources,
   };
 }
 
@@ -49,6 +55,16 @@ describe('isComboCandidate', () => {
   test('accepts a clean, unused, upcoming prediction', () => {
     const p = fakePrediction({ id: 1, pick: '1 (Domicile)' });
     expect(isComboCandidate(p, new Set())).toBe(true);
+  });
+
+  test('rejects a prediction outside the requested league filter', () => {
+    const p = fakePrediction({ id: 1, pick: '1 (Domicile)', leagueId: 39 }); // Premier League
+    expect(isComboCandidate(p, new Set(), new Set([1, 71, 667]))).toBe(false);
+  });
+
+  test('accepts a prediction matching the requested league filter', () => {
+    const p = fakePrediction({ id: 1, pick: '1 (Domicile)', leagueId: 71 }); // Brasileirão
+    expect(isComboCandidate(p, new Set(), new Set([1, 71, 667]))).toBe(true);
   });
 });
 
@@ -99,6 +115,81 @@ describe('buildComboMatches', () => {
     ];
     const result = buildComboMatches(predictions, new Set(['1']));
     expect(result.matches.map((m) => m.fixtureId)).toEqual([2, 3]);
+  });
+
+  test('with a league filter, ignores higher-probability matches outside that league', () => {
+    const predictions = [
+      fakePrediction({ id: 1, pick: '1 (Domicile)', home: 95, leagueId: 39 }), // Premier League, meilleure cote mais hors filtre
+      fakePrediction({ id: 2, pick: '1 (Domicile)', home: 60, leagueId: 1 }),   // Coupe du Monde
+      fakePrediction({ id: 3, pick: '1 (Domicile)', home: 55, leagueId: 71 }), // Brasileirão
+    ];
+    const result = buildComboMatches(predictions, new Set(), new Set([1, 71, 667]));
+    expect(result.matches.map((m) => m.fixtureId)).toEqual([2, 3]);
+  });
+
+  test('with a league filter, mixes matches from several allowed leagues', () => {
+    const predictions = [
+      fakePrediction({ id: 1, pick: '1 (Domicile)', home: 70, leagueId: 667 }), // Amicaux de clubs
+      fakePrediction({ id: 2, pick: '1 (Domicile)', home: 65, leagueId: 71 }),  // Brasileirão
+    ];
+    const result = buildComboMatches(predictions, new Set(), new Set([1, 71, 667]));
+    expect(result.matches.map((m) => m.fixtureId)).toEqual([1, 2]);
+  });
+
+  test('with a league filter, returns null instead of falling back to other leagues', () => {
+    const predictions = [
+      fakePrediction({ id: 1, pick: '1 (Domicile)', home: 95, leagueId: 39 }),
+      fakePrediction({ id: 2, pick: '1 (Domicile)', home: 80, leagueId: 1 }), // un seul match dans les ligues autorisées -> pas assez
+    ];
+    expect(buildComboMatches(predictions, new Set(), new Set([1, 71, 667]))).toBeNull();
+  });
+
+  test('with a custom rankFn, orders candidates by that score instead of pick probability', () => {
+    const predictions = [
+      fakePrediction({ id: 1, pick: '1 (Domicile)', home: 90 }), // meilleure proba 1X2 mais rank basse
+      fakePrediction({ id: 2, pick: '1 (Domicile)', home: 50 }),
+      fakePrediction({ id: 3, pick: '1 (Domicile)', home: 60 }),
+    ];
+    const rankFn = (p) => (p.fixture.id === 1 ? 0 : p.fixture.id === 2 ? 100 : 90);
+    const result = buildComboMatches(predictions, new Set(), undefined, rankFn);
+    expect(result.matches.map((m) => m.fixtureId)).toEqual([2, 3]);
+    // la probabilité affichée reste bien celle du pick 1X2, pas la valeur du rankFn
+    expect(result.matches.map((m) => m.probability)).toEqual([50, 60]);
+  });
+});
+
+describe('hasMediaCoverage', () => {
+  test('false when no web source flag is set', () => {
+    expect(hasMediaCoverage(fakePrediction({ id: 1, pick: '1 (Domicile)' }))).toBe(false);
+  });
+
+  test('true when at least one web source is present', () => {
+    const p = fakePrediction({ id: 1, pick: '1 (Domicile)', webSources: { oddsapi: true } });
+    expect(hasMediaCoverage(p)).toBe(true);
+  });
+});
+
+describe('footballComboRank', () => {
+  test('favors high BTTS + high H2H BTTS over a bare pick-probability edge', () => {
+    const highBtts = fakePrediction({ id: 1, pick: '1 (Domicile)', home: 55, btts: 80, h2hBttsRate: 80 });
+    const lowBtts = fakePrediction({ id: 2, pick: '1 (Domicile)', home: 70, btts: 20, h2hBttsRate: 10 });
+    expect(footballComboRank(highBtts)).toBeGreaterThan(footballComboRank(lowBtts));
+  });
+
+  test('falls back to weighting BTTS + pick probability when no H2H history exists', () => {
+    const p = fakePrediction({ id: 1, pick: '1 (Domicile)', home: 60, btts: 70 });
+    expect(footballComboRank(p)).toBeCloseTo(70 * 0.7 + 60 * 0.3, 5);
+  });
+
+  test('gives club friendlies a bonus only when media-covered (proxy for a big club)', () => {
+    const covered = fakePrediction({ id: 1, pick: '1 (Domicile)', home: 60, btts: 50, leagueId: 667, webSources: { forebet: true } });
+    const uncovered = fakePrediction({ id: 2, pick: '1 (Domicile)', home: 60, btts: 50, leagueId: 667 });
+    expect(footballComboRank(covered)).toBe(footballComboRank(uncovered) + 10);
+  });
+
+  test('does not apply the friendly bonus outside league 667', () => {
+    const p = fakePrediction({ id: 1, pick: '1 (Domicile)', home: 60, btts: 50, leagueId: 1, webSources: { forebet: true } });
+    expect(footballComboRank(p)).toBeCloseTo(50 * 0.7 + 60 * 0.3, 5);
   });
 });
 

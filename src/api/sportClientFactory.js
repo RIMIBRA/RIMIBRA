@@ -15,7 +15,10 @@ function createSportClient({ baseUrl, namespace, dailyLimit = 100, seasonFromDat
     if (cached) return cached;
 
     const used = cache.getDailyRequestCount(namespace);
-    if (used >= dailyLimit) return [];
+    if (used >= dailyLimit) {
+      cache.warnOnceIfQuotaReached(namespace, used, dailyLimit);
+      return [];
+    }
 
     const response = await axios.get(`${baseUrl}${endpoint}`, {
       headers: { 'x-apisports-key': process.env.API_FOOTBALL_KEY },

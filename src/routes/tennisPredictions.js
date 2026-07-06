@@ -3,14 +3,22 @@ const router = express.Router();
 const api = require('../api/tennisClient');
 const predictor = require('../algorithm/tennisPredictor');
 const { requireAdmin } = require('../auth/middleware');
+const { applyBreakdownGate } = require('../auth/breakdownGate');
+const cache = require('../cache/db');
+const { mapWithConcurrency } = require('../utils/concurrency');
 
-// Seuil au-delà duquel le pari "vainqueur sec" est jugé trop évident (cote proche de 1.0,
-// peu d'intérêt) pour qu'on aille chercher une alternative plus équilibrée dans les cotes réelles
-const OBVIOUS_PICK_THRESHOLD = 80;
+// Contrairement au foot (cotes via the-odds-api, quota mensuel serré), le tennis tire ses
+// cotes d'api-tennis.com (quota quotidien énorme, très peu utilisé) -> calculer l'alternative
+// pour CHAQUE match de la liste (pas juste à la demande sur un match ouvert) ne présente pas
+// le même risque de quota.
+const ALTERNATIVES_CONCURRENCY = 10;
+const ALTERNATIVES_TTL = 12 * 60; // même fenêtre que analyzeDayGames — pas de recalcul à chaque requête
 
-function pickProbability(p) {
-  return p.recommendation.pick.startsWith('1') ? p.probabilities.home : p.probabilities.away;
-}
+// "Trop évident" se juge sur la VRAIE cote bookmaker, jamais sur la confiance de notre propre
+// algo : les deux peuvent diverger fortement (ex. notre modèle à 68% alors que le marché est
+// à une cote de 1.02, quasi certain) — se fier au modèle ferait passer à côté de l'alternative
+// dans exactement le cas où elle est la plus utile.
+const OBVIOUS_ODD_MAX = 1.6;
 
 function averageOdd(bookmakers) {
   const values = Object.values(bookmakers).map(Number).filter((n) => !Number.isNaN(n));
@@ -49,11 +57,12 @@ function findBalancedAlternative(oddsBySport) {
 }
 
 async function buildAlternativeBet(matchId, analysis) {
-  if (analysis.matchState === 'finished' || pickProbability(analysis) < OBVIOUS_PICK_THRESHOLD) return null;
+  if (analysis.matchState === 'finished') return null;
   try {
     const odds = await api.getOdds(matchId);
     if (!odds) return null;
     const winOdd = averageOdd(odds['Home/Away']?.[analysis.recommendation.pick.startsWith('1') ? 'Home' : 'Away'] || {});
+    if (winOdd == null || winOdd > OBVIOUS_ODD_MAX) return null; // le marché ne juge pas ce pick "évident" -> pas d'alternative à proposer
     const alternative = findBalancedAlternative(odds);
     if (!alternative) return null;
     return { mainPickOdd: winOdd, alternative };
@@ -62,13 +71,31 @@ async function buildAlternativeBet(matchId, analysis) {
   }
 }
 
+// Enrichit chaque pronostic "à venir" avec son alternative de pari (cotes réelles) quand le
+// pari sec est jugé trop évident — mis en cache séparément pour ne pas retaper l'API à
+// chaque requête dans la même fenêtre de 12 min que analyzeDayGames.
+async function attachAlternativeBets(cacheKey, results) {
+  const cached = cache.get(cacheKey);
+  if (cached) return cached;
+
+  const augmented = await mapWithConcurrency(results, ALTERNATIVES_CONCURRENCY, async (r) => {
+    if (r.error || r.matchState === 'finished' || r.insufficientData) return r;
+    const alternativeBet = await buildAlternativeBet(r.fixture.id, r).catch(() => null);
+    return alternativeBet ? { ...r, alternativeBet } : r;
+  });
+
+  cache.set(cacheKey, augmented, ALTERNATIVES_TTL);
+  return augmented;
+}
+
 router.get('/today', async (req, res) => {
   try {
     const date = req.query.date || new Date().toISOString().split('T')[0];
     const { results, total, analyzed } = await predictor.analyzeDayGames(date);
+    const predictions = await attachAlternativeBets(`tennis_alternatives_${date}`, results);
     const used = api.getDailyRequestCount();
     const limitReached = used >= api.DAILY_LIMIT;
-    res.json({ date, predictions: results, total, analyzed, requestsUsed: used, requestsLeft: Math.max(0, api.DAILY_LIMIT - used), limitReached });
+    res.json({ date, predictions, total, analyzed, requestsUsed: used, requestsLeft: Math.max(0, api.DAILY_LIMIT - used), limitReached });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -80,8 +107,14 @@ router.get('/search', async (req, res) => {
     const q = (req.query.q || '').trim();
     if (!q) return res.status(400).json({ error: 'Paramètre "q" requis' });
     const { results, total } = await predictor.searchGames(date, q);
+    // Peu de résultats (recherche ciblée) -> pas besoin de cache dédié, on calcule à chaque fois
+    const predictions = await mapWithConcurrency(results, ALTERNATIVES_CONCURRENCY, async (r) => {
+      if (r.error || r.matchState === 'finished' || r.insufficientData) return r;
+      const alternativeBet = await buildAlternativeBet(r.fixture.id, r).catch(() => null);
+      return alternativeBet ? { ...r, alternativeBet } : r;
+    });
     const used = api.getDailyRequestCount();
-    res.json({ date, query: q, predictions: results, total, requestsUsed: used, requestsLeft: Math.max(0, api.DAILY_LIMIT - used) });
+    res.json({ date, query: q, predictions, total, requestsUsed: used, requestsLeft: Math.max(0, api.DAILY_LIMIT - used) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -100,7 +133,7 @@ router.get('/game/:id', async (req, res) => {
     if (!game) return res.status(404).json({ error: 'Match introuvable' });
     const analysis = await predictor.analyzeGame(game);
     const alternativeBet = await buildAlternativeBet(req.params.id, analysis);
-    res.json({ ...analysis, alternativeBet });
+    res.json(await applyBreakdownGate({ ...analysis, alternativeBet }, req, 'tennis'));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

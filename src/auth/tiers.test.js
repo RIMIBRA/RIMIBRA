@@ -1,4 +1,4 @@
-const { canAccessSport, canUseFeature, comboLimitFor, isFreePreviewMatch } = require('./tiers');
+const { canAccessSport, canUseFeature, comboLimitFor } = require('./tiers');
 
 describe('canAccessSport', () => {
   test('free plan can access football', () => {
@@ -32,7 +32,14 @@ describe('canUseFeature', () => {
     expect(canUseFeature('premium', 'search')).toBe(true);
   });
 
-  test('fullBreakdown requires vip', () => {
+  test('goalPrediction requires premium (free must unlock via ad, see breakdownGate.js)', () => {
+    expect(canUseFeature('free', 'goalPrediction')).toBe(false);
+    expect(canUseFeature('premium', 'goalPrediction')).toBe(true);
+    expect(canUseFeature('vip', 'goalPrediction')).toBe(true);
+  });
+
+  test('fullBreakdown requires vip (free/premium must unlock via ad)', () => {
+    expect(canUseFeature('free', 'fullBreakdown')).toBe(false);
     expect(canUseFeature('premium', 'fullBreakdown')).toBe(false);
     expect(canUseFeature('vip', 'fullBreakdown')).toBe(true);
   });
@@ -53,27 +60,5 @@ describe('comboLimitFor', () => {
 
   test('admin always unlimited regardless of plan', () => {
     expect(comboLimitFor('free', true)).toBe(Infinity);
-  });
-});
-
-describe('isFreePreviewMatch', () => {
-  test('matches when home team is in the free preview list', () => {
-    expect(isFreePreviewMatch('Real Madrid', 'Some Small Club')).toBe(true);
-  });
-
-  test('matches when away team is in the free preview list', () => {
-    expect(isFreePreviewMatch('Some Small Club', 'Liverpool')).toBe(true);
-  });
-
-  test('does not match when neither team is in the list', () => {
-    expect(isFreePreviewMatch('Some Small Club', 'Another Small Club')).toBe(false);
-  });
-
-  test('is case insensitive', () => {
-    expect(isFreePreviewMatch('BAYERN MUNICH', 'X')).toBe(true);
-  });
-
-  test('is accent insensitive', () => {
-    expect(isFreePreviewMatch('Bárcélona', 'X')).toBe(true);
   });
 });

@@ -33,25 +33,35 @@ async function enrichFixture(homeTeam, awayTeam, date, fpredList = null, forebet
   };
 }
 
-function blendProbabilities(algoProbabilities, webSources, anchorAlgo = true) {
+// weights : poids par source calculés par algorithm/calibration.js à partir du taux de
+// réussite réel accumulé dans prediction_results (voir schema.sql) — {algo:1, footballpred:1,
+// ...} par défaut tant qu'il n'y a pas assez de données résolues pour calibrer.
+function blendProbabilities(algoProbabilities, webSources, anchorAlgo = true, weights = {}) {
   const externals = [];
 
-  if (webSources.footballpred?.probabilities)  externals.push(webSources.footballpred.probabilities);
-  if (webSources.forebet?.probabilities)       externals.push(webSources.forebet.probabilities);
-  if (webSources.besoccer?.probabilities)      externals.push(webSources.besoccer.probabilities);
-  if (webSources.oddsapi?.probabilities)       externals.push(webSources.oddsapi.probabilities);
-  if (webSources.flashscore?.probabilities)    externals.push(webSources.flashscore.probabilities);
+  if (webSources.footballpred?.probabilities)  externals.push(['footballpred', webSources.footballpred.probabilities]);
+  if (webSources.forebet?.probabilities)       externals.push(['forebet', webSources.forebet.probabilities]);
+  if (webSources.besoccer?.probabilities)      externals.push(['besoccer', webSources.besoccer.probabilities]);
+  if (webSources.oddsapi?.probabilities)       externals.push(['oddsapi', webSources.oddsapi.probabilities]);
+  if (webSources.flashscore?.probabilities)    externals.push(['flashscore', webSources.flashscore.probabilities]);
 
   if (externals.length === 0) return algoProbabilities;
 
-  // anchorAlgo=true (données algo réelles) : l'algo compte double — il reste l'ancre principale
+  const weightOf = (source, fallback) => weights[source] ?? fallback;
+
+  // anchorAlgo=true (données algo réelles) : l'algo pèse "weights.algo" (2 par défaut) — il
+  //   reste l'ancre principale, davantage encore s'il s'est montré plus fiable que le blend
   // anchorAlgo=false (algo sans données, valeurs 50/50 par défaut) : les cotes bookmaker
   //   dominent seules, sans être polluées par le bruit des valeurs par défaut de l'algo
-  const all = anchorAlgo ? [algoProbabilities, algoProbabilities, ...externals] : externals;
+  const weighted = anchorAlgo
+    ? [[algoProbabilities, weightOf('algo', 2)], ...externals.map(([src, p]) => [p, weightOf(src, 1)])]
+    : externals.map(([src, p]) => [p, weightOf(src, 1)]);
+
+  const totalWeight = weighted.reduce((s, [, w]) => s + w, 0);
   const blended = {
-    home: Math.round(all.reduce((s, p) => s + p.home, 0) / all.length),
-    draw: Math.round(all.reduce((s, p) => s + p.draw, 0) / all.length),
-    away: Math.round(all.reduce((s, p) => s + p.away, 0) / all.length),
+    home: Math.round(weighted.reduce((s, [p, w]) => s + p.home * w, 0) / totalWeight),
+    draw: Math.round(weighted.reduce((s, [p, w]) => s + p.draw * w, 0) / totalWeight),
+    away: Math.round(weighted.reduce((s, [p, w]) => s + p.away * w, 0) / totalWeight),
   };
 
   const total = blended.home + blended.draw + blended.away;

@@ -23,6 +23,12 @@ const accountStatus = document.getElementById('account-status');
 // en cache pour un visiteur anonyme (ou un autre plan) resterait servie après connexion/changement de plan
 let currentUserKey = 'anon';
 
+// Infos de plan côté client, pour masquer aux visiteurs tout ce qui est purement interne
+// (quotas API, "X analysés sur Y") — ça ne les aide pas, ça ne fait que soulever des questions.
+// Seul le fondateur (admin) a besoin de voir ces détails ; il a de toute façon le dashboard pour ça.
+let currentUserIsAdmin = false;
+let canSearch = false; // premium/vip/admin uniquement — voir auth/tiers.js FEATURE_MIN_TIER.search
+
 // L'email vient de l'inscription utilisateur — jamais de confiance avant affichage HTML
 function escapeHtml(str) {
   return String(str ?? '').replace(/[&<>"']/g, (c) => ({
@@ -34,10 +40,15 @@ async function renderAccountStatus() {
   const user = await fetchCurrentUser();
   if (!user) {
     currentUserKey = 'anon';
+    currentUserIsAdmin = false;
+    canSearch = false;
     accountStatus.innerHTML = '<a href="/login.html">Se connecter</a>';
     return;
   }
   currentUserKey = `u${user.id}_${user.isAdmin ? 'admin' : user.plan}`;
+  currentUserIsAdmin = !!user.isAdmin;
+  canSearch = user.isAdmin || user.plan === 'premium' || user.plan === 'vip';
+  document.getElementById('api-badge').classList.toggle('hidden', !currentUserIsAdmin);
   const planLabel = user.isAdmin ? 'Admin' : ({ free: 'Gratuit', premium: 'Premium', vip: 'VIP' }[user.plan] || user.plan);
   const dashboardLink = user.isAdmin ? '<a href="/admin.html" id="dashboard-link">🛠️ Dashboard</a>' : '';
   accountStatus.innerHTML = `<span class="plan-${user.isAdmin ? 'admin' : user.plan}">${escapeHtml(user.email)} · ${planLabel}</span> ${dashboardLink} <a href="#" id="logout-link">Déconnexion</a>`;
@@ -84,46 +95,9 @@ function probClass(v) {
   return 'low';
 }
 
-// Conseille un pari "victoire sèche" quand un résultat domine nettement,
-// sinon une "double chance" (deux issues combinées) quand le match est incertain
-function buildBetAdvice(p) {
-  const { home, draw, away } = p.probabilities;
-  const max = Math.max(home, draw, away);
-
-  if (max >= 50) {
-    const label = home === max ? `Victoire sèche : ${p.fixture.home}`
-      : away === max ? `Victoire sèche : ${p.fixture.away}`
-      : 'Match nul';
-    return { short: label, detail: `Issue dominante (${max}%) — un pari simple semble justifié.` };
-  }
-
-  const doubleChances = [
-    { code: '1X', val: home + draw, label: `Double chance : ${p.fixture.home} ou match nul` },
-    { code: 'X2', val: draw + away, label: `Double chance : match nul ou ${p.fixture.away}` },
-    { code: '12', val: home + away, label: `Double chance : ${p.fixture.home} ou ${p.fixture.away} (sans nul)` },
-  ].sort((a, b) => b.val - a.val);
-  const best = doubleChances[0];
-
-  return { short: best.label, detail: `Match incertain (issue la plus probable à ${max}%) — une double chance (${best.val}%) est plus sûre qu'un pari sec.` };
-}
-
-function bttsVerdict(gp) {
-  if (!gp) return null;
-  if (gp.btts >= 55) return { text: 'Oui, probable', cls: 'goal-yes' };
-  if (gp.btts <= 40) return { text: 'Non, peu probable', cls: 'goal-no' };
-  return { text: 'Incertain', cls: 'goal-item' };
-}
-
-function goalsVerdict(gp) {
-  if (!gp) return null;
-  if (gp.over25 >= 55) return `Match probablement riche en buts — environ 3 buts ou plus (Plus de 2,5 : ${gp.over25}%)`;
-  if (gp.over15 >= 55) return `Total modéré attendu — environ 2 à 3 buts (Plus de 1,5 : ${gp.over15}%, Plus de 2,5 : ${gp.over25}%)`;
-  return `Match probablement pauvre en buts — environ 0 à 2 buts (Moins de 2,5 : ${100 - gp.over25}%)`;
-}
-
-function renderFormBadges(details) {
-  return details.map((d) => `<span class="form-badge ${d.result}" title="${d.opponent}: ${d.scored}-${d.conceded}">${d.result}</span>`).join('');
-}
+// buildBetAdvice, bttsVerdict, goalsVerdict, renderFormBadges, buildModalContent,
+// validationCard, buildValidationContent : voir js/matchModal.js (chargé avant ce fichier),
+// partagées avec le dashboard admin.
 
 function buildCard(p) {
   if (p.error) {
@@ -215,166 +189,6 @@ function buildCard(p) {
         <span class="confidence ${rec.confidence}">${rec.confidence}</span>
       </div>
     </div>`;
-}
-
-function buildModalContent(p) {
-  if (p.error) return `<p style="color:var(--red)">${p.error}</p>`;
-  const b = p.breakdown;
-  const time = new Date(p.fixture.date).toLocaleString('fr-FR');
-
-  const barRow = (label, val) => `
-    <div class="bar-row">
-      <span class="bar-label">${label}</span>
-      <div class="bar-track"><div class="bar-fill home" style="width:${val}%"></div></div>
-      <span style="font-size:0.8rem;width:30px">${val}</span>
-    </div>`;
-
-  const formHtml = (form) => {
-    if (!form || !form.details) return '<span style="color:var(--muted)">N/A</span>';
-    return `<div class="form-badges">${renderFormBadges(form.details)}</div>`;
-  };
-
-  return `
-    <div class="modal-title">${p.fixture.home} vs ${p.fixture.away}</div>
-    <div class="modal-league">${p.fixture.league} · ${time}</div>
-
-    <div class="detail-section">
-      <h3>Probabilités</h3>
-      <div class="grid-2" style="grid-template-columns:1fr 1fr 1fr">
-        <div class="stat-box"><div class="label">Domicile (1)</div><div class="value" style="color:var(--green)">${p.probabilities.home}%</div></div>
-        <div class="stat-box"><div class="label">Nul (X)</div><div class="value" style="color:var(--yellow)">${p.probabilities.draw}%</div></div>
-        <div class="stat-box"><div class="label">Extérieur (2)</div><div class="value" style="color:var(--purple)">${p.probabilities.away}%</div></div>
-      </div>
-    </div>
-
-    <div class="detail-section">
-      <h3>Conseil de pari</h3>
-      <div class="stat-box">
-        <div class="label">Issue du match</div>
-        <div class="value" style="color:var(--blue);font-size:0.95rem">${buildBetAdvice(p).short}</div>
-        <div style="font-size:0.75rem;color:var(--muted);margin-top:0.3rem">${buildBetAdvice(p).detail}</div>
-      </div>
-      ${p.alternativeBet ? `
-      <div class="stat-box" style="margin-top:0.5rem;border:1px solid var(--yellow)">
-        <div class="label">⚠️ Pari sec trop évident (cote ~${p.alternativeBet.mainPickOdd ?? '1.0'}) — alternative plus équilibrée</div>
-        <div class="value" style="color:var(--yellow);font-size:0.95rem">${p.alternativeBet.alternative.market}</div>
-        <div style="font-size:0.75rem;color:var(--muted);margin-top:0.3rem">Cote moyenne observée chez les bookmakers : ${p.alternativeBet.alternative.odd}</div>
-      </div>` : ''}
-      ${p.goalPrediction ? `
-      <div class="grid-2" style="margin-top:0.5rem">
-        <div class="stat-box">
-          <div class="label">Les deux équipes marquent (BTTS) ?</div>
-          <div class="value ${bttsVerdict(p.goalPrediction).cls === 'goal-yes' ? '' : ''}" style="color:${bttsVerdict(p.goalPrediction).cls === 'goal-yes' ? 'var(--green)' : bttsVerdict(p.goalPrediction).cls === 'goal-no' ? 'var(--red)' : 'var(--muted)'}">${bttsVerdict(p.goalPrediction).text}</div>
-          <div style="font-size:0.75rem;color:var(--muted);margin-top:0.2rem">Probabilité estimée : ${p.goalPrediction.btts}%</div>
-        </div>
-        <div class="stat-box">
-          <div class="label">Nombre de buts attendu</div>
-          <div style="font-size:0.8rem;margin-top:0.2rem">${goalsVerdict(p.goalPrediction)}</div>
-        </div>
-      </div>` : ''}
-    </div>
-
-    ${p.goalPrediction ? `
-    <div class="detail-section">
-      <h3>Analyse des buts</h3>
-      <div class="grid-2" style="grid-template-columns:1fr 1fr 1fr 1fr">
-        ${p.goalPrediction.xGHome !== null ? `
-        <div class="stat-box"><div class="label">xG ${p.fixture.home.substring(0,8)}</div><div class="value" style="color:var(--blue)">${p.goalPrediction.xGHome}</div></div>
-        <div class="stat-box"><div class="label">xG ${p.fixture.away.substring(0,8)}</div><div class="value" style="color:var(--blue)">${p.goalPrediction.xGAway}</div></div>
-        ` : ''}
-        <div class="stat-box"><div class="label">Plus de 1,5 buts</div><div class="value" style="color:${p.goalPrediction.over15 >= 60 ? 'var(--green)' : 'var(--muted)'}">${p.goalPrediction.over15}%</div></div>
-        <div class="stat-box"><div class="label">Plus de 2,5 buts</div><div class="value" style="color:${p.goalPrediction.over25 >= 50 ? 'var(--green)' : 'var(--muted)'}">${p.goalPrediction.over25}%</div></div>
-      </div>
-      <div class="grid-2" style="margin-top:0.5rem">
-        <div class="stat-box"><div class="label">Les deux marquent (BTTS)</div><div class="value" style="color:${p.goalPrediction.btts >= 50 ? 'var(--green)' : 'var(--muted)'}">${p.goalPrediction.btts}%</div></div>
-        <div class="stat-box"><div class="label">Moins de 2,5 buts</div><div class="value" style="color:${(100 - p.goalPrediction.over25) >= 50 ? 'var(--green)' : 'var(--muted)'}">${100 - p.goalPrediction.over25}%</div></div>
-      </div>
-    </div>` : ''}
-
-    ${p.odds ? `
-    <div class="detail-section">
-      <h3>Cotes bookmaker</h3>
-      <div class="grid-2" style="grid-template-columns:1fr 1fr 1fr">
-        <div class="stat-box"><div class="label">1 (Dom)</div><div class="value" style="color:var(--green)">${p.odds.home}</div></div>
-        <div class="stat-box"><div class="label">X (Nul)</div><div class="value" style="color:var(--yellow)">${p.odds.draw}</div></div>
-        <div class="stat-box"><div class="label">2 (Ext)</div><div class="value" style="color:var(--purple)">${p.odds.away}</div></div>
-      </div>
-    </div>` : ''}
-
-    ${!p.noApiData ? `
-    <div class="detail-section">
-      <h3>Score algorithmique</h3>
-      ${barRow(p.fixture.home.substring(0, 8), p.scores.home)}
-      ${barRow(p.fixture.away.substring(0, 8), p.scores.away)}
-    </div>` : `
-    <div class="detail-section">
-      <h3>Score algorithmique</h3>
-      <p style="font-size:0.8rem;color:var(--muted)">⚠️ Score non calculé — données API indisponibles pour ces équipes (quota épuisé ou données absentes). Seules les cotes bookmaker ont été utilisées pour la prédiction.</p>
-    </div>`}
-
-    <div class="detail-section">
-      <h3>Forme récente (5 derniers matchs)</h3>
-      <div style="margin-bottom:0.4rem;font-size:0.8rem;color:var(--muted)">${p.fixture.home}</div>
-      ${formHtml(b.form.home)}
-      <div style="margin-top:0.5rem;margin-bottom:0.4rem;font-size:0.8rem;color:var(--muted)">${p.fixture.away}</div>
-      ${formHtml(b.form.away)}
-    </div>
-
-    <div class="detail-section">
-      <h3>Tête-à-tête</h3>
-      <p style="font-size:0.85rem">${b.h2h.summary}</p>
-      ${b.h2h.total > 0 ? `
-        <div class="grid-2" style="margin-top:0.5rem">
-          <div class="stat-box"><div class="label">Victoires ${p.fixture.home}</div><div class="value">${b.h2h.team1Wins}</div></div>
-          <div class="stat-box"><div class="label">Victoires ${p.fixture.away}</div><div class="value">${b.h2h.team2Wins}</div></div>
-        </div>` : ''}
-    </div>
-
-    ${b.standings.available ? `
-    <div class="detail-section">
-      <h3>Classement</h3>
-      <div class="grid-2">
-        <div class="stat-box">
-          <div class="label">${p.fixture.home}</div>
-          <div class="value">#${b.standings.team1.rank}</div>
-          <div style="font-size:0.75rem;color:var(--muted)">${b.standings.team1.points} pts · GD ${b.standings.team1.goalsDiff > 0 ? '+' : ''}${b.standings.team1.goalsDiff}</div>
-        </div>
-        <div class="stat-box">
-          <div class="label">${p.fixture.away}</div>
-          <div class="value">#${b.standings.team2.rank}</div>
-          <div style="font-size:0.75rem;color:var(--muted)">${b.standings.team2.points} pts · GD ${b.standings.team2.goalsDiff > 0 ? '+' : ''}${b.standings.team2.goalsDiff}</div>
-        </div>
-      </div>
-    </div>` : ''}
-
-    <div class="detail-section">
-      <h3>Joueurs absents / suspendus</h3>
-      <div class="grid-2">
-        <div class="stat-box">
-          <div class="label">${p.fixture.home} — ${b.injuries.team1.count} absent(s)</div>
-          ${b.injuries.team1.players?.length > 0
-            ? b.injuries.team1.players.map(pl => `
-              <div class="injury-row">
-                <span class="injury-name">${pl.name}</span>
-                <span class="injury-pos">${pl.position}</span>
-                <span class="injury-reason ${pl.suspended ? 'suspended' : 'injured'}">${pl.suspended ? '🟥 Suspendu' : '🤕 ' + pl.reason}</span>
-              </div>`).join('')
-            : '<div style="color:var(--muted);font-size:0.8rem">Aucun absent connu</div>'}
-        </div>
-        <div class="stat-box">
-          <div class="label">${p.fixture.away} — ${b.injuries.team2.count} absent(s)</div>
-          ${b.injuries.team2.players?.length > 0
-            ? b.injuries.team2.players.map(pl => `
-              <div class="injury-row">
-                <span class="injury-name">${pl.name}</span>
-                <span class="injury-pos">${pl.position}</span>
-                <span class="injury-reason ${pl.suspended ? 'suspended' : 'injured'}">${pl.suspended ? '🟥 Suspendu' : '🤕 ' + pl.reason}</span>
-              </div>`).join('')
-            : '<div style="color:var(--muted);font-size:0.8rem">Aucun absent connu</div>'}
-        </div>
-      </div>
-    </div>
-  `;
 }
 
 let allPredictions = [];
@@ -469,9 +283,10 @@ async function loadPredictions(date, { force = false } = {}) {
       errorBox.style.background = 'rgba(88,166,255,0.1)';
       errorBox.style.borderColor = 'var(--blue)';
       errorBox.style.color = 'var(--blue)';
-      errorBox.textContent = '🔒 Aperçu gratuit : seuls les matchs des grandes équipes sélectionnées sont visibles. Passe Premium pour tout voir.';
+      errorBox.textContent = '🔒 Aperçu gratuit : 5 matchs à venir visibles (tous les résultats terminés restent accessibles). Passe Premium pour tout voir.';
       errorBox.classList.remove('hidden');
-    } else if (data.limitReached) {
+    } else if (data.limitReached && currentUserIsAdmin) {
+      // Detail interne (quota API) -> reserve au fondateur, un visiteur normal n'en a pas besoin
       errorBox.style.background = 'rgba(210,153,34,0.1)';
       errorBox.style.borderColor = 'var(--yellow)';
       errorBox.style.color = 'var(--yellow)';
@@ -524,59 +339,7 @@ function singleMatchEndpoint(id) {
   return currentSport === 'football' ? `${apiBase()}/fixture/${id}` : `${apiBase()}/game/${id}`;
 }
 
-function validationCard(label, predicted, actual, correct) {
-  if (correct === null || correct === undefined) {
-    return `<div class="stat-box"><div class="label">${label}</div><div class="value" style="color:var(--muted);font-size:0.85rem">Pas de pronostic tranché</div></div>`;
-  }
-  return `
-    <div class="stat-box" style="border:1px solid ${correct ? 'var(--green)' : 'var(--red)'}">
-      <div class="label">${label}</div>
-      <div class="value" style="font-size:0.95rem">${predicted}</div>
-      <div style="font-size:0.75rem;color:var(--muted);margin-top:0.2rem">Réel : ${actual}</div>
-      <div style="margin-top:0.3rem;font-weight:700;color:${correct ? 'var(--green)' : 'var(--red)'}">${correct ? '✅' : '❌'}</div>
-    </div>`;
-}
-
-function buildValidationContent(p) {
-  const time = new Date(p.fixture.date).toLocaleString('fr-FR');
-  if (!p.validation) {
-    return `
-      <div class="modal-title">${p.fixture.home} vs ${p.fixture.away}</div>
-      <div class="modal-league">${p.fixture.league} · ${time}</div>
-      <p style="margin-top:1rem;color:var(--muted)">Score final non disponible — impossible de valider la prédiction pour ce match.</p>`;
-  }
-
-  const { actualScore, actualPick, correct, btts, over25 } = p.validation;
-  const correctCount = [correct, btts?.correct, over25?.correct].filter((c) => c === true).length;
-  const totalCount = [correct, btts?.correct, over25?.correct].filter((c) => c !== null && c !== undefined).length;
-
-  return `
-    <div class="modal-title">${p.fixture.home} vs ${p.fixture.away}</div>
-    <div class="modal-league">${p.fixture.league} · ${time}</div>
-
-    <div class="detail-section">
-      <h3>Résultat final</h3>
-      <div class="stat-box"><div class="label">Score</div><div class="value">${actualScore.home} - ${actualScore.away}</div></div>
-    </div>
-
-    <div class="detail-section">
-      <h3>Validation des pronostics (${correctCount}/${totalCount} validés)</h3>
-      <div class="grid-2" style="grid-template-columns:1fr 1fr 1fr">
-        ${validationCard('Issue (1X2)', p.recommendation.pick, actualPick, correct)}
-        ${btts ? validationCard('BTTS', btts.predicted, btts.actual, btts.correct) : validationCard('BTTS', '—', '—', null)}
-        ${over25 ? validationCard('+/-2,5 buts', over25.predicted, over25.actual, over25.correct) : validationCard('+/-2,5 buts', '—', '—', null)}
-      </div>
-    </div>
-
-    <div class="detail-section">
-      <h3>Probabilités prédites avant le match</h3>
-      <div class="grid-2" style="grid-template-columns:1fr 1fr 1fr">
-        <div class="stat-box"><div class="label">Dom (1)</div><div class="value">${p.probabilities.home}%</div></div>
-        <div class="stat-box"><div class="label">Nul (X)</div><div class="value">${p.probabilities.draw}%</div></div>
-        <div class="stat-box"><div class="label">Ext (2)</div><div class="value">${p.probabilities.away}%</div></div>
-      </div>
-    </div>`;
-}
+// validationCard, buildValidationContent : voir js/matchModal.js
 
 function attachFinishedCardClickHandlers(container, predictions) {
   container.querySelectorAll('.finished-card[data-id]').forEach((card) => {
@@ -644,9 +407,12 @@ function renderGrid(predictions) {
       <span class="top-banner-sub">Classés par confiance puis probabilité maximale · ${buckets.upcoming.length + buckets.live.length} matchs analysés au total</span>
     </div>` : '';
 
-  const coverageNote = lastMeta.total > lastMeta.analyzed ? `
+  // Le detail (quota API, nombre de matchs traites) est purement interne -> sans interet pour
+  // un visiteur. Seul ce qui l'aide concrètement (où trouver un match manquant) est montré,
+  // et seulement à ceux qui peuvent effectivement s'en servir (recherche = premium/vip/admin).
+  const coverageNote = (lastMeta.total > lastMeta.analyzed && canSearch) ? `
     <p style="grid-column:1/-1;font-size:0.78rem;color:var(--muted);margin-bottom:0.75rem">
-      ℹ️ ${lastMeta.analyzed} matchs analysés en détail sur ${lastMeta.total} disponibles aujourd'hui — la limite quotidienne de l'API restreint le nombre de matchs traités (les plus suivis par les bookmakers sont priorisés). D'autres rencontres (amicaux, compétitions mineures) peuvent ne pas apparaître ici. Utilisez la recherche pour les retrouver.
+      🔍 Vous ne trouvez pas un match ? Cherchez l'équipe que vous voulez dans la barre de recherche.
     </p>` : '';
 
   const sections = [];
@@ -671,6 +437,7 @@ function renderGrid(predictions) {
 }
 
 function updateApiStatus(used, remaining) {
+  if (!currentUserIsAdmin) return; // détail interne, sans intérêt pour un visiteur normal
   const badge = document.getElementById('api-badge');
   const total = used + remaining;
   badge.textContent = `API: ${used}/${total} requêtes`;
@@ -736,6 +503,37 @@ btnLoad.addEventListener('click', () => {
 });
 modalClose.addEventListener('click', () => modal.classList.add('hidden'));
 modalBackdrop.addEventListener('click', () => modal.classList.add('hidden'));
+
+// Délégation d'événement : le bouton est recréé à chaque rendu de la modale (innerHTML
+// remplacé), un seul listener ici suffit pour tous ses rendus successifs.
+modalContent.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.ad-unlock-btn');
+  if (!btn) return;
+  const { sport, fixtureId, level } = btn.dataset;
+  const viewsRequired = parseInt(btn.dataset.viewsRequired, 10);
+  const originalLabel = `📺 Débloquer avec une pub (${btn.dataset.viewsDone}/${viewsRequired})`;
+
+  showRewardedAd(async () => {
+    btn.disabled = true;
+    btn.textContent = 'Déblocage…';
+    try {
+      const progress = await recordAdView(sport, fixtureId, level);
+      if (progress.unlocked) {
+        const res = await fetch(singleMatchEndpoint(fixtureId), { headers: authHeaders() });
+        const fresh = await res.json();
+        modalContent.innerHTML = buildModalContent(fresh);
+      } else {
+        btn.dataset.viewsDone = progress.viewsCount;
+        btn.disabled = false;
+        btn.textContent = `📺 Débloquer avec une pub (${progress.viewsCount}/${progress.viewsRequired})`;
+      }
+    } catch (err) {
+      btn.disabled = false;
+      btn.textContent = originalLabel;
+      alert('Déblocage impossible : ' + err.message);
+    }
+  });
+});
 
 topFilters.querySelectorAll('.filter-btn').forEach((btn) => {
   btn.addEventListener('click', () => {

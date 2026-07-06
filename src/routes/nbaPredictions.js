@@ -3,6 +3,7 @@ const router = express.Router();
 const { analyzeDayGames, searchGames, analyzeGame } = require('../algorithm/nbaPredictor');
 const api = require('../api/nbaClient');
 const { requireAdmin } = require('../auth/middleware');
+const { applyBreakdownGate } = require('../auth/breakdownGate');
 
 router.get('/today', async (req, res) => {
   try {
@@ -40,7 +41,7 @@ router.get('/game/:id', async (req, res) => {
     const game = await api.getGameById(req.params.id);
     if (!game) return res.status(404).json({ error: 'Match introuvable' });
     const analysis = await analyzeGame(game);
-    res.json(analysis);
+    res.json(await applyBreakdownGate(analysis, req, 'nba'));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

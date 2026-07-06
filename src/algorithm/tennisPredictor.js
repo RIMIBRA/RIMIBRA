@@ -3,6 +3,7 @@ const api = require('../api/tennisClient');
 
 module.exports = createTeamSportPredictor({
   api,
+  sport: 'tennis',
   leagueLabel: 'Tennis',
   homeAdvantage: 0, // pas d'avantage "domicile" entre deux joueurs
   allowDraw: false, // un match de tennis a toujours un vainqueur

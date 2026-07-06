@@ -4,6 +4,7 @@ const { analyzeH2H } = require('./h2h');
 const { normalize, expandSearchTerms } = require('./teamAliases');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const cache = require('../cache/db');
+const predictionResults = require('../db/predictionResults');
 const FULL_ANALYSIS_TTL = 12 * 60; // 12 min : bon compromis vitesse/fraîcheur des statuts en direct
 
 const HOME_ADVANTAGE = 5;
@@ -108,6 +109,30 @@ async function analyzeGame(game) {
     ? computeValidation(recommendation.pick, game.goals?.home, game.goals?.away)
     : null;
 
+  // Pas de blend pour la NBA (aucune source web) -> le pronostic final EST le pronostic de
+  // l'algo, algoPick/algoProbabilities sont donc identiques à predictedPick/probabilities.
+  // Aucun coût de quota supplémentaire : simple écriture DB des données déjà récupérées.
+  if (matchState === 'upcoming' && !insufficientData) {
+    predictionResults
+      .recordPrediction({
+        sport: 'nba',
+        fixtureId,
+        league: `${game.league.name || 'NBA'} — ${game.league.country || 'USA'}`,
+        homeTeam: homeTeam.name,
+        awayTeam: awayTeam.name,
+        predictedPick: recommendation.pick,
+        confidence: recommendation.confidence,
+        probabilities: probs,
+        algoPick: recommendation.pick,
+        algoProbabilities: probs,
+        goalPrediction: null,
+        sources: {},
+        noApiData: insufficientData,
+        featured: true,
+      })
+      .catch((err) => console.error('Échec enregistrement pronostic nba (ignoré):', err.message));
+  }
+
   return {
     fixture: {
       id: fixtureId,
@@ -150,7 +175,17 @@ async function analyzeDayGames(date) {
 async function analyzeDayGamesUncached(date) {
   const games = await api.getGamesByDate(date);
   const upcoming = games.filter((f) => UPCOMING_STATUSES.includes(f.fixture.status.short));
-  const finished = games.filter((f) => FINISHED_STATUSES.includes(f.fixture.status.short)).map(buildFinishedEntry);
+  const finishedGames = games.filter((f) => FINISHED_STATUSES.includes(f.fixture.status.short));
+  const finished = finishedGames.map(buildFinishedEntry);
+
+  for (const g of finishedGames) {
+    if (g.goals?.home != null && g.goals?.away != null) {
+      predictionResults
+        .resolvePrediction('nba', g.fixture.id, g.goals.home, g.goals.away)
+        .catch((err) => console.error('Échec résolution pronostic nba (ignoré):', err.message));
+    }
+  }
+
   upcoming.sort((a, b) => (isPriorityLeague(b) ? 1 : 0) - (isPriorityLeague(a) ? 1 : 0));
   const toAnalyze = upcoming.slice(0, MAX_GAMES_PER_DAY);
 

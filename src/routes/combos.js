@@ -31,6 +31,16 @@ const SPORTS = [
 
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN', 'AWD', 'WO'];
 
+// Coupe du Monde, championnat brésilien et amicaux de clubs — ids vérifiés via l'API plutôt
+// que sur le nom affiché (trop fragile, voir commentaire dans algorithm/predictor.js).
+// Les combinés foot doivent piocher exclusivement dans ces compétitions, sans repli sur les
+// autres ligues même hors période de Coupe du Monde (voir getOrCreateComboSeries).
+const FOOTBALL_COMBO_LEAGUE_IDS = new Set([
+  1,   // Coupe du Monde
+  71,  // Brasileirão Série A (Brésil)
+  667, // Amicaux de clubs
+]);
+
 function pickProbability(p) {
   const { home, draw = 0, away } = p.probabilities;
   if (p.recommendation.pick.startsWith('1')) return home;
@@ -38,17 +48,53 @@ function pickProbability(p) {
   return draw;
 }
 
-function isComboCandidate(p, usedIds) {
+function isComboCandidate(p, usedIds, leagueIds) {
+  if (leagueIds && !leagueIds.has(p.fixture.leagueId)) return false;
   return !p.error && !p.insufficientData && p.matchState !== 'finished' && p.probabilities && !usedIds.has(String(p.fixture.id));
 }
 
+// Un match a de la "couverture média" s'il est suivi par au moins une source de cotes/pronostics
+// externe — sert de proxy pour repérer les grosses équipes dans les amicaux de clubs (league
+// 667), où l'écrasante majorité des affiches n'ont ni historique ni cotes exploitables : pas de
+// liste de noms d'équipes à maintenir (fragile, voir PRIORITY_LEAGUE_IDS dans predictor.js),
+// juste le signal déjà calculé pour chaque match.
+function hasMediaCoverage(p) {
+  const s = p.webSources;
+  return !!(s && (s.oddsapi || s.footballpred || s.forebet || s.besoccer || s.flashscore));
+}
+
+// Priorise les matchs foot à BTTS élevé (les deux équipes marquent), en tenant aussi compte du
+// BTTS historique de leurs confrontations passées — règle n°1 pour les combinés foot, demandée
+// explicitement pour privilégier des matchs plus "ouverts"/prévisibles plutôt que la seule
+// probabilité de l'issue 1X2. Pour les amicaux de clubs, bonus aux affiches couvertes par une
+// source externe (proxy "grande équipe", voir hasMediaCoverage) — le tête-à-tête reste dans le
+// score via h2hBttsRate, donc toujours pris en compte même pour ces matchs-là.
+function footballComboRank(p) {
+  const bttsProb = p.goalPrediction?.btts ?? 0;
+  const h2hBttsRate = p.breakdown?.h2h?.bttsRate;
+  const baseProb = pickProbability(p);
+
+  const score = h2hBttsRate != null
+    ? bttsProb * 0.5 + h2hBttsRate * 0.3 + baseProb * 0.2
+    : bttsProb * 0.7 + baseProb * 0.3;
+
+  const isFriendly = p.fixture.leagueId === 667;
+  return isFriendly && hasMediaCoverage(p) ? score + 10 : score;
+}
+
 // Choisit les 2 meilleurs matchs PAS DÉJÀ UTILISÉS dans un combiné précédent du même
-// sport/jour — pour ne jamais répéter exactement la même paire dans la même journée
-function buildComboMatches(predictions, usedIds) {
+// sport/jour — pour ne jamais répéter exactement la même paire dans la même journée.
+// leagueIds (optionnel, un Set) restreint les candidats à un ensemble de compétitions précis
+// (foot -> Coupe du Monde + championnat brésilien + amicaux de clubs, voir
+// FOOTBALL_COMBO_LEAGUE_IDS) : moins de 2 candidats dans ces ligues -> pas de combiné du tout
+// ce jour-là, volontairement pas de repli sur d'autres compétitions. rankFn (optionnel) change
+// le critère de tri des candidats sans changer ce qui est combiné (pick + probabilité 1X2
+// restent affichés tels quels) — voir footballComboRank pour le foot.
+function buildComboMatches(predictions, usedIds, leagueIds, rankFn = pickProbability) {
   const candidates = predictions
-    .filter((p) => isComboCandidate(p, usedIds))
-    .map((p) => ({ p, prob: pickProbability(p) }))
-    .sort((a, b) => b.prob - a.prob);
+    .filter((p) => isComboCandidate(p, usedIds, leagueIds))
+    .map((p) => ({ p, prob: pickProbability(p), rank: rankFn(p) }))
+    .sort((a, b) => b.rank - a.rank);
 
   if (candidates.length < 2) return null;
 
@@ -118,7 +164,9 @@ async function getOrCreateComboSeries(sport, date) {
   if (needsNewCombo) {
     const usedIds = new Set(stored.flatMap((row) => row.matches.map((m) => String(m.fixtureId))));
     const { results } = await sport.analyzeDay(date);
-    const built = buildComboMatches(results, usedIds);
+    const leagueFilter = sport.key === 'football' ? FOOTBALL_COMBO_LEAGUE_IDS : undefined;
+    const rankFn = sport.key === 'football' ? footballComboRank : undefined;
+    const built = buildComboMatches(results, usedIds, leagueFilter, rankFn);
     if (built) {
       await saveCombo(date, sport.key, sport.label, built.matches, built.combinedProbability, built.risk);
       const matches = built.matches.map((m) => ({ ...m, finished: false, validated: null }));
@@ -244,3 +292,5 @@ module.exports.isComboCandidate = isComboCandidate;
 module.exports.buildComboMatches = buildComboMatches;
 module.exports.summarize = summarize;
 module.exports.addDays = addDays;
+module.exports.hasMediaCoverage = hasMediaCoverage;
+module.exports.footballComboRank = footballComboRank;

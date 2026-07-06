@@ -6,6 +6,7 @@ const PRIORITY_LEAGUE_IDS = new Set([39, 103]);
 
 module.exports = createTeamSportPredictor({
   api,
+  sport: 'handball',
   leagueLabel: 'Handball',
   homeAdvantage: 4,
   allowDraw: true, // le nul existe en handball comme au foot
