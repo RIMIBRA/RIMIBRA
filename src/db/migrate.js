@@ -4,10 +4,10 @@ const path = require('path');
 const { Pool } = require('pg');
 
 async function migrate() {
-  const isLocalDb = /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL || '');
+  const needsSsl = /\.render\.com/.test(process.env.DATABASE_URL || '');
   const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl: isLocalDb ? false : { rejectUnauthorized: false },
+    ssl: needsSsl ? { rejectUnauthorized: false } : false,
   });
   const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   try {
@@ -19,6 +19,8 @@ async function migrate() {
 }
 
 migrate().catch((err) => {
-  console.error('Erreur de migration:', err.message);
+  // err.message est parfois vide selon le type d'erreur réseau/pg — logguer l'objet complet
+  // pour ne pas se retrouver sans aucune piste dans les logs de déploiement.
+  console.error('Erreur de migration:', err);
   process.exit(1);
 });
