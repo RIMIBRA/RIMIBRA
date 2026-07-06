@@ -17,6 +17,13 @@ process.on('unhandledRejection', (err) => {
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Nécessaire dès qu'on est derrière un proxy inverse (Render, Heroku...) : sans ça,
+// express-rate-limit refuse de démarrer (il ne peut pas faire confiance à l'en-tête
+// X-Forwarded-For pour identifier l'IP réelle du visiteur) et toutes les routes protégées par
+// un rate limiter (login/register/ads) plantent avec une ValidationError. "1" = on fait
+// confiance à exactement un saut de proxy, ce qui correspond à l'infra de Render.
+app.set('trust proxy', 1);
+
 app.use(helmet({ contentSecurityPolicy: false })); // CSP désactivée pour l'instant (scripts inline absents mais à revoir si on en ajoute)
 app.use(express.json({ limit: '100kb' })); // limite la taille du corps des requêtes (anti-DoS basique)
 app.use(express.static(path.join(__dirname, '../public')));
