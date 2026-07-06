@@ -1,15 +1,16 @@
 require('dotenv').config();
 const { Pool } = require('pg');
 
-// Les connexions locales (dev) n'ont pas de certificat SSL configuré ; les hébergeurs comme
-// Render l'exigent en revanche pour toute connexion venant de l'extérieur de leur réseau
-// (sinon: ECONNRESET). rejectUnauthorized: false car ces hébergeurs utilisent des certificats
-// auto-signés en interne — la connexion reste chiffrée, seule la chaîne de confiance du
-// certificat n'est pas vérifiée.
-const isLocalDb = /localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL || '');
+// SSL seulement pour les URLs Postgres EXTERNES de Render (ex: depuis un PC local, hostname
+// en "xxx.render.com") — elles l'exigent, sinon ECONNRESET. L'URL interne qu'utilise l'app une
+// fois déployée SUR Render (hostname court, sans domaine) n'en a ni besoin ni le même support :
+// forcer ssl dessus casse la connexion. rejectUnauthorized: false car ces hébergeurs utilisent
+// des certificats auto-signés en interne — la connexion externe reste chiffrée, seule la
+// chaîne de confiance du certificat n'est pas vérifiée.
+const needsSsl = /\.render\.com/.test(process.env.DATABASE_URL || '');
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: isLocalDb ? false : { rejectUnauthorized: false },
+  ssl: needsSsl ? { rejectUnauthorized: false } : false,
 });
 
 // Sans ce listener, une erreur sur un client "idle" (connexion coupée par la DB, blip réseau,
