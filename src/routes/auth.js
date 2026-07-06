@@ -1,5 +1,10 @@
 const express = require('express');
-const bcrypt = require('bcrypt');
+// bcryptjs (implémentation pure JS, même API que bcrypt) plutôt que bcrypt : ce dernier est un
+// module natif compilé en C++, et s'est révélé se bloquer silencieusement (timeout, sans même
+// une erreur) sur l'environnement Linux de Render en production, un problème invisible en dev
+// sur Windows. bcryptjs élimine toute compilation native, donc ce risque de comportement
+// différent selon la plateforme/version de Node.
+const bcrypt = require('bcryptjs');
 const router = express.Router();
 const { createUser, findUserByEmail, getAuthInfo, setPlan } = require('../db/users');
 const subscriptionPlans = require('../db/subscriptionPlans');
