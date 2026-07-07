@@ -51,7 +51,9 @@ async function renderAccountStatus() {
   document.getElementById('api-badge').classList.toggle('hidden', !currentUserIsAdmin);
   const planLabel = user.isAdmin ? 'Admin' : ({ free: 'Gratuit', premium: 'Premium', vip: 'VIP' }[user.plan] || user.plan);
   const dashboardLink = user.isAdmin ? '<a href="/admin.html" id="dashboard-link">🛠️ Dashboard</a>' : '';
-  accountStatus.innerHTML = `<span class="plan-${user.isAdmin ? 'admin' : user.plan}">${escapeHtml(user.email)} · ${planLabel}</span> ${dashboardLink} <a href="#" id="logout-link">Déconnexion</a>`;
+  // Pas de proposition d'upgrade pour un admin ou un VIP (déjà au niveau maximum d'accès)
+  const upgradeLink = !user.isAdmin && user.plan !== 'vip' ? '<a href="/pricing.html">⭐ Passer Premium/VIP</a>' : '';
+  accountStatus.innerHTML = `<span class="plan-${user.isAdmin ? 'admin' : user.plan}">${escapeHtml(user.email)} · ${planLabel}</span> ${upgradeLink} ${dashboardLink} <a href="#" id="logout-link">Déconnexion</a>`;
   document.getElementById('logout-link').addEventListener('click', (e) => {
     e.preventDefault();
     clearToken();

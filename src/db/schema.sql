@@ -48,6 +48,24 @@ ON CONFLICT (plan, duration_days) DO NOTHING;
 -- branché) — nul pour un abonnement 'free' ou un changement de plan manuel sans offre associée.
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS plan_id INTEGER REFERENCES subscription_plans(id);
 
+-- Une ligne par tentative de paiement (GeniusPay pour l'instant). Le plan n'est activé
+-- (setPlan) que lorsque le webhook confirme 'completed' — jamais depuis la redirection
+-- success_url seule, qu'un utilisateur pourrait atteindre sans avoir vraiment payé.
+CREATE TABLE IF NOT EXISTS payment_transactions (
+  id           SERIAL PRIMARY KEY,
+  user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  plan_id      INTEGER NOT NULL REFERENCES subscription_plans(id),
+  provider     TEXT NOT NULL DEFAULT 'geniuspay',
+  reference    TEXT UNIQUE,
+  status       TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'completed', 'failed', 'cancelled', 'expired')),
+  amount_fcfa  INTEGER NOT NULL,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  completed_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_payment_transactions_reference ON payment_transactions(reference);
+CREATE INDEX IF NOT EXISTS idx_payment_transactions_user ON payment_transactions(user_id, created_at DESC);
+
 -- Note : le cache des réponses API (cache-data.json) et le journal de quotas
 -- (cache-requests*.json) restent en fichiers pour l'instant — migration vers Postgres
 -- à faire séparément si besoin, ça touche ~13 fichiers de scrapers.

@@ -1,0 +1,67 @@
+.pricing-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+.pricing-page h1 {
+  text-align: center;
+  margin: 1rem 0 0.5rem;
+}
+
+.pricing-intro {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-bottom: 2rem;
+}
+
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.pricing-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.pricing-card.plan-vip { border-color: var(--blue); }
+
+.pricing-card .pricing-plan-name {
+  font-weight: 700;
+  font-size: 1rem;
+}
+
+.pricing-card .pricing-price {
+  font-size: 1.6rem;
+  font-weight: 700;
+}
+
+.pricing-card .pricing-duration {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-bottom: 0.5rem;
+}
+
+.pricing-card button {
+  background: var(--blue);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.65rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+  margin-top: auto;
+}
+
+.pricing-card button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
