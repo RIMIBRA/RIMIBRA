@@ -26,7 +26,10 @@ const PORT = process.env.PORT || 3001;
 app.set('trust proxy', 1);
 
 app.use(helmet({ contentSecurityPolicy: false })); // CSP désactivée pour l'instant (scripts inline absents mais à revoir si on en ajoute)
-app.use(express.json({ limit: '100kb' })); // limite la taille du corps des requêtes (anti-DoS basique)
+// req.rawBody : Buffer exact du corps reçu, nécessaire pour vérifier la signature HMAC des
+// webhooks GeniusPay (voir routes/payments.js) — un objet JSON re-sérialisé pourrait différer
+// octet à octet de ce que GeniusPay a réellement signé (ordre des clés, espacement...).
+app.use(express.json({ limit: '100kb', verify: (req, res, buf) => { req.rawBody = buf; } })); // limite la taille du corps des requêtes (anti-DoS basique)
 app.use(express.static(path.join(__dirname, '../public')));
 app.use(attachUser); // remplit req.user (null si pas de token / token invalide -> traité comme 'free')
 
@@ -43,6 +46,7 @@ app.use('/api/ads', adsLimiter);
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/ads', require('./routes/ads'));
+app.use('/api/payments', require('./routes/payments'));
 
 // Foot reste accessible en plan gratuit ; les autres sports nécessitent premium ou plus
 app.use('/api/predictions', require('./routes/predictions'));
