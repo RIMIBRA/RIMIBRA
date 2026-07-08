@@ -6,7 +6,7 @@ const express = require('express');
 // différent selon la plateforme/version de Node.
 const bcrypt = require('bcryptjs');
 const router = express.Router();
-const { createUser, findUserByEmail, getAuthInfo } = require('../db/users');
+const { createUser, findUserByEmail, getAuthInfo, touchLastLogin } = require('../db/users');
 const subscriptionPlans = require('../db/subscriptionPlans');
 const { sign } = require('../auth/jwt');
 const { attachUser } = require('../auth/middleware');
@@ -26,6 +26,8 @@ router.post('/register', async (req, res) => {
 
     const passwordHash = await bcrypt.hash(password, 12);
     const user = await createUser(email.toLowerCase(), passwordHash);
+    // Ne doit jamais faire échouer l'inscription si ça échoue (voir touchLastLogin)
+    touchLastLogin(user.id).catch((err) => console.error('touchLastLogin (register) ignoré :', err.message));
     const token = sign({ userId: user.id, email: user.email });
     res.status(201).json({ token, user: { id: user.id, email: user.email, plan: 'free', isAdmin: false } });
   } catch (err) {
@@ -45,6 +47,8 @@ router.post('/login', async (req, res) => {
     if (!valid) return res.status(401).json({ error: 'Identifiants invalides' });
 
     const { plan, isAdmin } = await getAuthInfo(user.id);
+    // Ne doit jamais faire échouer la connexion si ça échoue (voir touchLastLogin)
+    touchLastLogin(user.id).catch((err) => console.error('touchLastLogin (login) ignoré :', err.message));
     const token = sign({ userId: user.id, email: user.email });
     res.json({ token, user: { id: user.id, email: user.email, plan, isAdmin } });
   } catch (err) {

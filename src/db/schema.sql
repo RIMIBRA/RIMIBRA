@@ -11,6 +11,11 @@ CREATE TABLE IF NOT EXISTS users (
 -- Idempotent : ajoute la colonne si la table existait déjà avant cette mise à jour
 ALTER TABLE users ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT false;
 
+-- Mis à jour à chaque connexion/inscription (voir db/users.js touchLastLogin) : sert à
+-- distinguer au dashboard admin les comptes créés mais jamais revenus des utilisateurs
+-- réellement actifs, ce que la seule date de création ne permet pas de voir.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+
 -- Un seul abonnement actif par utilisateur à la fois (le plus récent fait foi)
 CREATE TABLE IF NOT EXISTS subscriptions (
   id          SERIAL PRIMARY KEY,
