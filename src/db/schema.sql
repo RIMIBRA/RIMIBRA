@@ -170,3 +170,16 @@ ALTER TABLE ad_unlocks DROP CONSTRAINT IF EXISTS ad_unlocks_user_id_sport_fixtur
 -- cible à ON CONFLICT côté application.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_ad_unlocks_user_sport_fixture_level
   ON ad_unlocks(user_id, sport, fixture_id, level);
+
+-- Analytics de trafic minimal, sans cookie ni service tiers (voir db/analytics.js) : une ligne
+-- par vue de page. visitor_hash = hash(IP + user-agent + jour + secret serveur), jamais l'IP en
+-- clair -> sert uniquement à approximer les visiteurs uniques par jour (compte de hashs
+-- distincts), impossible à faire remonter à une personne précise.
+CREATE TABLE IF NOT EXISTS page_views (
+  id            SERIAL PRIMARY KEY,
+  path          TEXT NOT NULL,
+  visitor_hash  TEXT NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_page_views_created_at ON page_views(created_at);

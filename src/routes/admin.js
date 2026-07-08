@@ -4,6 +4,7 @@ const { requireAdmin } = require('../auth/middleware');
 const { listUsersWithPlan } = require('../db/users');
 const predictionResults = require('../db/predictionResults');
 const calibration = require('../algorithm/calibration');
+const analytics = require('../db/analytics');
 
 const footballApi = require('../api/client');
 const nflApi = require('../api/nflClient');
@@ -78,6 +79,16 @@ router.get('/tracked-predictions', async (req, res) => {
     const featured = req.query.featured === undefined ? undefined : req.query.featured === 'true';
     const predictions = await predictionResults.listPredictions({ sport, date, featured });
     res.json({ sport, date, count: predictions.length, predictions });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.get('/analytics', async (req, res) => {
+  try {
+    const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 30));
+    const stats = await analytics.getStats(days);
+    res.json(stats);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

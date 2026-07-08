@@ -122,6 +122,51 @@ async function renderTrackedSection(extraOnly, sport) {
     </section>`;
 }
 
+// Trafic minimal (pas de cookie/tiers, voir src/db/analytics.js) : vues de page et visiteurs
+// uniques approximés par jour, sur les 14 derniers jours, pour avoir un vrai chiffre à donner
+// aux régies publicitaires (elles demandent toujours le volume avant d'ouvrir certains accès).
+function renderTrafficSection({ daily, topPages }) {
+  const totalViews = daily.reduce((sum, d) => sum + d.pageviews, 0);
+  const totalVisitors = daily.reduce((sum, d) => sum + d.visitors, 0);
+  const avgPerDay = daily.length ? Math.round(totalViews / daily.length) : 0;
+
+  const dailyRows = daily.slice().reverse().map((d) => `
+    <tr>
+      <td>${new Date(d.day).toLocaleDateString('fr-FR')}</td>
+      <td>${d.pageviews}</td>
+      <td>${d.visitors}</td>
+    </tr>`).join('');
+
+  const topPagesRows = topPages.map((p) => `
+    <tr><td>${escapeHtml(p.path)}</td><td>${p.pageviews}</td></tr>`).join('');
+
+  return `
+    <section>
+      <h2>Trafic (14 derniers jours)</h2>
+      <div class="stat-cards">
+        <div class="stat-card"><div class="stat-card-label">Vues totales</div><div class="stat-card-value">${totalViews}</div></div>
+        <div class="stat-card"><div class="stat-card-label">Visiteurs uniques (approx.)</div><div class="stat-card-value">${totalVisitors}</div></div>
+        <div class="stat-card"><div class="stat-card-label">Moyenne / jour</div><div class="stat-card-value">${avgPerDay}</div></div>
+      </div>
+      <div class="grid-2" style="margin-top:1rem">
+        <div>
+          <h3 style="font-size:0.85rem;color:var(--muted);margin-bottom:0.5rem">Par jour</h3>
+          <table class="admin-table">
+            <thead><tr><th>Jour</th><th>Vues</th><th>Visiteurs</th></tr></thead>
+            <tbody>${dailyRows || '<tr><td colspan="3">Pas encore de données</td></tr>'}</tbody>
+          </table>
+        </div>
+        <div>
+          <h3 style="font-size:0.85rem;color:var(--muted);margin-bottom:0.5rem">Pages les plus vues</h3>
+          <table class="admin-table">
+            <thead><tr><th>Page</th><th>Vues</th></tr></thead>
+            <tbody>${topPagesRows || '<tr><td colspan="2">Pas encore de données</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+    </section>`;
+}
+
 async function loadDashboard(extraOnly = true, sport = 'football') {
   const user = await fetchCurrentUser();
   if (!user) {
@@ -133,9 +178,10 @@ async function loadDashboard(extraOnly = true, sport = 'football') {
     return;
   }
 
-  const [statsRes, usersRes, trackedSection] = await Promise.all([
+  const [statsRes, usersRes, analyticsRes, trackedSection] = await Promise.all([
     fetch('/api/admin/stats', { headers: authHeaders() }),
     fetch('/api/admin/users', { headers: authHeaders() }),
+    fetch('/api/admin/analytics?days=14', { headers: authHeaders() }),
     renderTrackedSection(extraOnly, sport),
   ]);
 
@@ -146,6 +192,7 @@ async function loadDashboard(extraOnly = true, sport = 'football') {
 
   const stats = await statsRes.json();
   const { users: usersList } = await usersRes.json();
+  const trafficSection = analyticsRes.ok ? renderTrafficSection(await analyticsRes.json()) : '';
 
   const planCards = ['free', 'premium', 'vip'].map((p) => `
     <div class="stat-card">
@@ -177,6 +224,8 @@ async function loadDashboard(extraOnly = true, sport = 'football') {
       <h2>Quotas API du jour</h2>
       ${quotaRows}
     </section>
+
+    ${trafficSection}
 
     ${trackedSection}
 
