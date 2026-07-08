@@ -62,7 +62,7 @@ async function renderAccountStatus() {
 }
 
 const SPORTS = {
-  football: { base: '/api/predictions', title: '⚽ Football Predictor' },
+  football: { base: '/api/predictions', title: '⚽ footpredictongoal' },
   nfl: { base: '/api/nfl/predictions', title: '🏈 NFL Predictor' },
   nba: { base: '/api/nba/predictions', title: '🏀 Basketball Predictor' },
   hockey: { base: '/api/hockey/predictions', title: '🏒 Hockey Predictor' },
