@@ -1,0 +1,68 @@
+.partners-page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+.partners-page h1 {
+  text-align: center;
+  margin: 1rem 0 0.5rem;
+}
+
+.partners-intro {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-bottom: 1.25rem;
+}
+
+.partners-warning {
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--yellow);
+  border: 1px solid var(--yellow);
+  border-radius: 8px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 2rem;
+}
+
+.partners-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+}
+
+.partner-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.partner-name {
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.partner-desc {
+  color: var(--muted);
+  font-size: 0.85rem;
+  flex: 1;
+}
+
+.partner-cta {
+  display: block;
+  text-align: center;
+  background: var(--blue);
+  color: #fff;
+  text-decoration: none;
+  border-radius: 8px;
+  padding: 0.65rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.partner-cta:hover { opacity: 0.9; }
