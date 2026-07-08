@@ -180,6 +180,12 @@ main {
 
 .hidden { display: none !important; }
 
+.ad-slot {
+  margin: 1.25rem 0;
+  text-align: center;
+  overflow: hidden;
+}
+
 #loading {
   text-align: center;
   padding: 3rem;
