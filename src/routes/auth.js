@@ -6,7 +6,7 @@ const express = require('express');
 // différent selon la plateforme/version de Node.
 const bcrypt = require('bcryptjs');
 const router = express.Router();
-const { createUser, findUserByEmail, getAuthInfo, setPlan } = require('../db/users');
+const { createUser, findUserByEmail, getAuthInfo } = require('../db/users');
 const subscriptionPlans = require('../db/subscriptionPlans');
 const { sign } = require('../auth/jwt');
 const { attachUser } = require('../auth/middleware');
@@ -67,26 +67,8 @@ router.get('/plans', async (req, res) => {
   }
 });
 
-// ⚠️ Pas de paiement réel branché (FedaPay) pour l'instant — accepte directement planId sans
-// vérifier qu'un paiement a eu lieu, comme routes/ads.js pour les pubs. À gater derrière la
-// confirmation FedaPay (webhook signé) dès qu'elle existe ; ne pas laisser tel quel en prod.
-router.post('/subscribe', attachUser, async (req, res) => {
-  if (!req.user) return res.status(401).json({ error: 'Non authentifié' });
-  const { plan, planId } = req.body || {};
-
-  // Repasser gratuit ne correspond à aucune offre du catalogue (pas de durée/prix à choisir)
-  if (plan === 'free') {
-    const sub = await setPlan(req.user.id, 'free', null);
-    return res.json({ plan: sub.plan, expiresAt: sub.expires_at });
-  }
-
-  if (!planId) return res.status(400).json({ error: 'planId requis (voir GET /api/auth/plans)' });
-  const catalogPlan = await subscriptionPlans.getPlanById(planId);
-  if (!catalogPlan) return res.status(400).json({ error: 'Offre invalide' });
-
-  const expiresAt = new Date(Date.now() + catalogPlan.duration_days * 24 * 3600 * 1000);
-  const sub = await setPlan(req.user.id, catalogPlan.plan, expiresAt, catalogPlan.id);
-  res.json({ plan: sub.plan, expiresAt: sub.expires_at, planId: catalogPlan.id, priceFcfa: catalogPlan.price_fcfa });
-});
+// Le passage à un plan payant se fait uniquement via /api/payments/checkout (GeniusPay) puis
+// le webhook signé (voir routes/payments.js), jamais via une route qui accepterait un planId
+// directement du client sans preuve de paiement.
 
 module.exports = router;
