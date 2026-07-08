@@ -3,9 +3,10 @@
 // 'premium' : foot + tous les sports d'équipe, ET prédiction de buts (goalPrediction) incluse.
 // 'vip'     : tout premium + détail complet (breakdown + probabilités du marché) + recherche
 //             + combinés illimités.
-// Les deux niveaux verrouillés (goalPrediction, fullBreakdown) restent débloquables match par
-// match contre des pubs récompensées même sans le plan requis — voir auth/breakdownGate.js et
-// db/adUnlocks.js pour le nombre de vues nécessaires selon le plan actuel.
+// Les deux niveaux verrouillés (goalPrediction, fullBreakdown) ne se débloquent que par
+// abonnement — voir auth/breakdownGate.js. (Le déblocage par pub récompensée a été retiré :
+// sans compte Google Ad Manager branché, rien ne vérifiait côté serveur qu'une pub avait
+// vraiment été vue, ce qui permettait de débloquer le contenu premium/VIP gratuitement.)
 const TIER_RANK = { free: 0, premium: 1, vip: 2 };
 
 const SPORT_MIN_TIER = {

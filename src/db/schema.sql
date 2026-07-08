@@ -139,15 +139,13 @@ CREATE INDEX IF NOT EXISTS idx_prediction_results_unresolved
 CREATE INDEX IF NOT EXISTS idx_prediction_results_predicted_at
   ON prediction_results(sport, predicted_at);
 
--- Déblocage match par match contre le visionnage de pubs récompensées, à deux niveaux (voir
--- tiers.js et auth/breakdownGate.js) :
---   'premium_details' = prédiction de buts (normalement incluse dès le plan premium)
---   'vip_details'     = détail complet : forme, H2H, blessures, classement, probabilités du
---                       marché (normalement inclus uniquement au plan VIP)
--- Le nombre de vues requises dépend du plan actuel de l'utilisateur (voir db/adUnlocks.js
--- requiredViewsFor) : plus l'écart avec le plan qui inclut déjà ce niveau est grand, plus il
--- faut de vues. views_count progresse à chaque pub vue ; unlocked_at ne se remplit qu'une fois
--- le seuil atteint, et reste acquis ensuite (jamais remis à zéro).
+-- DÉPRÉCIÉE : servait au déblocage match par match contre le visionnage de pubs récompensées.
+-- Retirée de l'application (aucun compte Google Ad Manager branché => aucune vérification
+-- serveur réelle du visionnage, un utilisateur pouvait appeler l'ancien /api/ads/unlock
+-- directement et débloquer le contenu premium/VIP sans jamais voir de pub). Le déblocage se
+-- fait désormais uniquement par abonnement (voir auth/breakdownGate.js et auth/tiers.js).
+-- Table conservée telle quelle (pas de DROP) pour ne pas perdre l'historique existant ; plus
+-- aucun code applicatif ne la lit ni ne l'écrit.
 CREATE TABLE IF NOT EXISTS ad_unlocks (
   id          SERIAL PRIMARY KEY,
   user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
