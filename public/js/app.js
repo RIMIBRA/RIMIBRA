@@ -119,7 +119,10 @@ function buildCard(p) {
   const rec = p.recommendation;
   const confClass = rec.confidence === 'Élevée' ? 'confidence-high' : rec.confidence === 'Moyenne' ? 'confidence-medium' : 'confidence-low';
   const time = new Date(p.fixture.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  const webBadges = [
+  // Badges de provenance/qualité des données : détail interne (voir le commentaire sur
+  // currentUserIsAdmin plus haut) — un visiteur normal n'en a aucun usage, ça ne fait que
+  // soulever des questions ("c'est quoi OddsAPI ?", "pourquoi données limitées ?").
+  const webBadges = !currentUserIsAdmin ? '' : [
     p.webSources?.footballpred ? '<span class="web-badge">FPred</span>' : '',
     p.webSources?.forebet      ? '<span class="web-badge">Forebet</span>' : '',
     p.webSources?.besoccer     ? '<span class="web-badge">BeSoccer</span>' : '',
@@ -127,7 +130,7 @@ function buildCard(p) {
     p.webSources?.flashscore   ? '<span class="web-badge odds-badge">Flashscore</span>' : '',
     p.webSources?.soccerway    ? '<span class="web-badge" style="background:rgba(16,185,129,0.15);color:#10b981">Soccerway</span>' : '',
   ].filter(Boolean).join('');
-  const modeBadge = p.webMode ? '<span class="no-data-badge">Mode Web</span>' : '';
+  const modeBadge = (currentUserIsAdmin && p.webMode) ? '<span class="no-data-badge">Mode Web</span>' : '';
 
   if (p.insufficientData) {
     return `
@@ -150,7 +153,7 @@ function buildCard(p) {
       </div>`;
   }
 
-  const noDataBadge = !p.webMode && p.noApiData ? '<span class="no-data-badge">Données API limitées</span>' : '';
+  const noDataBadge = (currentUserIsAdmin && !p.webMode && p.noApiData) ? '<span class="no-data-badge">Données API limitées</span>' : '';
 
   return `
     <div class="card ${confClass}" data-id="${p.fixture.id}">
