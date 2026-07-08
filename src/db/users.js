@@ -18,6 +18,12 @@ async function findUserByEmail(email) {
   return rows[0] || null;
 }
 
+// Appelé à chaque connexion réussie et à l'inscription (voir routes/auth.js) — jamais bloquant
+// pour le flux d'auth : un échec ici ne doit pas empêcher un utilisateur de se connecter.
+async function touchLastLogin(userId) {
+  await pool.query('UPDATE users SET last_login_at = now() WHERE id = $1', [userId]);
+}
+
 async function findUserById(id) {
   const { rows } = await pool.query('SELECT id, email, is_admin, created_at FROM users WHERE id = $1', [id]);
   return rows[0] || null;
@@ -58,7 +64,7 @@ async function setPlan(userId, plan, expiresAt = null, planId = null) {
 // Pour le dashboard admin : liste des utilisateurs avec leur plan actif
 async function listUsersWithPlan() {
   const { rows } = await pool.query(`
-    SELECT u.id, u.email, u.is_admin, u.created_at,
+    SELECT u.id, u.email, u.is_admin, u.created_at, u.last_login_at,
       COALESCE((
         SELECT plan FROM subscriptions s
         WHERE s.user_id = u.id AND s.status = 'active' AND (s.expires_at IS NULL OR s.expires_at > now())
@@ -78,4 +84,5 @@ module.exports = {
   getAuthInfo,
   setPlan,
   listUsersWithPlan,
+  touchLastLogin,
 };

@@ -200,6 +200,17 @@ async function loadDashboard(extraOnly = true, sport = 'football') {
       <div class="stat-card-value">${stats.users.byPlan[p] || 0}</div>
     </div>`).join('');
 
+  // "Actif" = connecté au moins une fois dans les 7 derniers jours (last_login_at, voir
+  // db/users.js touchLastLogin) — distingue les comptes créés puis jamais revenus des
+  // utilisateurs qui utilisent vraiment le site, ce que la seule date de création ne montre pas.
+  const ACTIVE_WINDOW_MS = 7 * 24 * 3600 * 1000;
+  const activeCount = usersList.filter((u) => u.last_login_at && (Date.now() - new Date(u.last_login_at).getTime()) < ACTIVE_WINDOW_MS).length;
+  const activeCard = `
+    <div class="stat-card">
+      <div class="stat-card-label">Actifs (7j)</div>
+      <div class="stat-card-value">${activeCount}</div>
+    </div>`;
+
   const quotaRows = Object.entries(stats.quotas).map(([sport, q]) => `
     <div class="sport-quota">
       <div class="sport-quota-name">${sport}</div>
@@ -212,12 +223,13 @@ async function loadDashboard(extraOnly = true, sport = 'football') {
       <td><span class="plan-tag plan-${u.plan}">${PLAN_LABEL[u.plan] || u.plan}</span></td>
       <td>${u.is_admin ? '✅' : ''}</td>
       <td>${new Date(u.created_at).toLocaleDateString('fr-FR')}</td>
+      <td>${u.last_login_at ? new Date(u.last_login_at).toLocaleDateString('fr-FR') : '<span style="color:var(--muted)">Jamais</span>'}</td>
     </tr>`).join('');
 
   main.innerHTML = `
     <section>
       <h2>Utilisateurs (${stats.users.total})</h2>
-      <div class="stat-cards">${planCards}</div>
+      <div class="stat-cards">${planCards}${activeCard}</div>
     </section>
 
     <section>
@@ -232,7 +244,7 @@ async function loadDashboard(extraOnly = true, sport = 'football') {
     <section>
       <h2>Liste des comptes</h2>
       <table class="admin-table">
-        <thead><tr><th>Email</th><th>Plan</th><th>Admin</th><th>Inscrit le</th></tr></thead>
+        <thead><tr><th>Email</th><th>Plan</th><th>Admin</th><th>Inscrit le</th><th>Dernière connexion</th></tr></thead>
         <tbody>${userRows}</tbody>
       </table>
     </section>
