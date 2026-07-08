@@ -42,6 +42,13 @@ app.use('/api/auth', require('./routes/auth'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/payments', require('./routes/payments'));
 
+// Endpoint public appelé une fois par chargement de page (voir public/js/analytics.js) : rate
+// limit généreux mais présent, pour qu'un visiteur normal ne soit jamais gêné tout en bornant
+// l'abus (boucle de faux pageviews qui gonflerait page_views pour rien).
+const analyticsLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
+app.use('/api/analytics', analyticsLimiter);
+app.use('/api/analytics', require('./routes/analytics'));
+
 // Foot reste accessible en plan gratuit ; les autres sports nécessitent premium ou plus
 app.use('/api/predictions', require('./routes/predictions'));
 app.use('/api/nfl/predictions', requireSportAccess('nfl'), require('./routes/nflPredictions'));
