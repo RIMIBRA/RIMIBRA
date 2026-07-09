@@ -163,6 +163,8 @@ main {
   color: #0d1117;
   font-weight: 700;
 }
+.filter-btn.locked-filter { border-style: dashed; color: var(--yellow); }
+.filter-btn.locked-filter:hover { border-color: var(--yellow); color: var(--yellow); }
 
 .top-banner {
   grid-column: 1 / -1;

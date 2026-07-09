@@ -28,6 +28,7 @@ let currentUserKey = 'anon';
 // Seul le fondateur (admin) a besoin de voir ces détails ; il a de toute façon le dashboard pour ça.
 let currentUserIsAdmin = false;
 let canSearch = false; // premium/vip/admin uniquement — voir auth/tiers.js FEATURE_MIN_TIER.search
+let isPayingPlan = false; // premium/vip/admin — conditionne les filtres Top 3/Top 2 (voir updateTopFilterLocks)
 
 // L'email vient de l'inscription utilisateur — jamais de confiance avant affichage HTML
 function escapeHtml(str) {
@@ -42,12 +43,16 @@ async function renderAccountStatus() {
     currentUserKey = 'anon';
     currentUserIsAdmin = false;
     canSearch = false;
+    isPayingPlan = false;
+    updateTopFilterLocks();
     accountStatus.innerHTML = '<a href="/login.html">Se connecter</a>';
     return;
   }
   currentUserKey = `u${user.id}_${user.isAdmin ? 'admin' : user.plan}`;
   currentUserIsAdmin = !!user.isAdmin;
   canSearch = user.isAdmin || user.plan === 'premium' || user.plan === 'vip';
+  isPayingPlan = user.isAdmin || user.plan === 'premium' || user.plan === 'vip';
+  updateTopFilterLocks();
   document.getElementById('api-badge').classList.toggle('hidden', !currentUserIsAdmin);
   const planLabel = user.isAdmin ? 'Admin' : ({ free: 'Gratuit', premium: 'Premium', vip: 'VIP' }[user.plan] || user.plan);
   const dashboardLink = user.isAdmin ? '<a href="/admin.html" id="dashboard-link">🛠️ Dashboard</a>' : '';
@@ -58,6 +63,19 @@ async function renderAccountStatus() {
     e.preventDefault();
     clearToken();
     window.location.reload();
+  });
+}
+
+// Top 3 / Top 2 (les sélections les plus resserrées, donc les plus "vendables") réservés aux
+// abonnés payants — Top 10/Top 5/Tous restent accessibles à tous. Purement un filtre d'affichage
+// côté client (aucune donnée supplémentaire en jeu), donc un verrou visuel + redirection vers la
+// page tarifs suffit, pas besoin d'un contrôle serveur pour ce genre de tri.
+function updateTopFilterLocks() {
+  topFilters.querySelectorAll('.filter-btn').forEach((btn) => {
+    const n = parseInt(btn.dataset.n, 10);
+    const restricted = n === 3 || n === 2;
+    btn.classList.toggle('locked-filter', restricted && !isPayingPlan);
+    btn.textContent = restricted && !isPayingPlan ? `🔒 Top ${n}` : (n > 0 ? `Top ${n}` : 'Tous');
   });
 }
 
@@ -511,9 +529,14 @@ modalBackdrop.addEventListener('click', () => modal.classList.add('hidden'));
 
 topFilters.querySelectorAll('.filter-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
+    const n = parseInt(btn.dataset.n, 10);
+    if ((n === 3 || n === 2) && !isPayingPlan) {
+      window.location.href = '/pricing.html';
+      return;
+    }
     topFilters.querySelectorAll('.filter-btn').forEach((b) => b.classList.remove('active'));
     btn.classList.add('active');
-    activeTopN = parseInt(btn.dataset.n);
+    activeTopN = n;
     renderGrid(allPredictions);
   });
 });
