@@ -17,4 +17,19 @@ router.post('/pageview', async (req, res) => {
   }
 });
 
+// Un clic sur un bouton partenaire (voir public/partenaires.html) — même principe que
+// /pageview : fire-and-forget, ne bloque jamais l'ouverture du lien d'affiliation.
+router.post('/click', async (req, res) => {
+  try {
+    const { partner, path } = req.body || {};
+    if (!partner || typeof partner !== 'string') {
+      return res.status(400).json({ error: 'Paramètre "partner" requis.' });
+    }
+    await analytics.recordClick(partner, path, req.ip, req.headers['user-agent']);
+    res.status(204).end();
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

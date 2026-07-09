@@ -16,6 +16,24 @@ async function recordPageView(path, ip, userAgent) {
   );
 }
 
+async function recordClick(partner, path, ip, userAgent) {
+  await pool.query(
+    'INSERT INTO partner_clicks (partner, path, visitor_hash) VALUES ($1, $2, $3)',
+    [String(partner).slice(0, 50), String(path || '').slice(0, 200), visitorHash(ip || '', userAgent || '')]
+  );
+}
+
+async function getClickStats(days) {
+  const { rows } = await pool.query(
+    `SELECT partner, count(*)::int AS clicks
+     FROM partner_clicks
+     WHERE created_at >= now() - ($1 || ' days')::interval
+     GROUP BY partner ORDER BY clicks DESC`,
+    [days]
+  );
+  return rows;
+}
+
 async function getStats(days) {
   const { rows: daily } = await pool.query(
     `SELECT to_char(date_trunc('day', created_at), 'YYYY-MM-DD') AS day,
@@ -36,4 +54,4 @@ async function getStats(days) {
   return { daily, topPages };
 }
 
-module.exports = { recordPageView, getStats };
+module.exports = { recordPageView, getStats, recordClick, getClickStats };

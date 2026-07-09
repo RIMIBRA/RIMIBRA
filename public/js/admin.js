@@ -125,7 +125,7 @@ async function renderTrackedSection(extraOnly, sport) {
 // Trafic minimal (pas de cookie/tiers, voir src/db/analytics.js) : vues de page et visiteurs
 // uniques approximés par jour, sur les 14 derniers jours, pour avoir un vrai chiffre à donner
 // aux régies publicitaires (elles demandent toujours le volume avant d'ouvrir certains accès).
-function renderTrafficSection({ daily, topPages }) {
+function renderTrafficSection({ daily, topPages, clicksByPartner }) {
   const totalViews = daily.reduce((sum, d) => sum + d.pageviews, 0);
   const totalVisitors = daily.reduce((sum, d) => sum + d.visitors, 0);
   const avgPerDay = daily.length ? Math.round(totalViews / daily.length) : 0;
@@ -139,6 +139,9 @@ function renderTrafficSection({ daily, topPages }) {
 
   const topPagesRows = topPages.map((p) => `
     <tr><td>${escapeHtml(p.path)}</td><td>${p.pageviews}</td></tr>`).join('');
+
+  const partnerClicksRows = (clicksByPartner || []).map((c) => `
+    <tr><td>${escapeHtml(c.partner)}</td><td>${c.clicks}</td></tr>`).join('');
 
   return `
     <section>
@@ -161,6 +164,13 @@ function renderTrafficSection({ daily, topPages }) {
           <table class="admin-table">
             <thead><tr><th>Page</th><th>Vues</th></tr></thead>
             <tbody>${topPagesRows || '<tr><td colspan="2">Pas encore de données</td></tr>'}</tbody>
+          </table>
+        </div>
+        <div>
+          <h3 style="font-size:0.85rem;color:var(--muted);margin-bottom:0.5rem">Clics par partenaire</h3>
+          <table class="admin-table">
+            <thead><tr><th>Partenaire</th><th>Clics</th></tr></thead>
+            <tbody>${partnerClicksRows || '<tr><td colspan="2">Pas encore de données</td></tr>'}</tbody>
           </table>
         </div>
       </div>

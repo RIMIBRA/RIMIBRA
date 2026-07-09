@@ -188,3 +188,15 @@ CREATE TABLE IF NOT EXISTS page_views (
 );
 
 CREATE INDEX IF NOT EXISTS idx_page_views_created_at ON page_views(created_at);
+
+-- Clics sur les liens d'affiliation (voir public/partenaires.html) — même hash de visiteur que
+-- page_views, pour savoir quel partenaire convertit le mieux sans jamais stocker l'IP en clair.
+CREATE TABLE IF NOT EXISTS partner_clicks (
+  id            SERIAL PRIMARY KEY,
+  partner       TEXT NOT NULL,
+  path          TEXT NOT NULL,
+  visitor_hash  TEXT NOT NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_partner_clicks_created_at ON partner_clicks(created_at);

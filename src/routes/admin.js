@@ -87,8 +87,11 @@ router.get('/tracked-predictions', async (req, res) => {
 router.get('/analytics', async (req, res) => {
   try {
     const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 30));
-    const stats = await analytics.getStats(days);
-    res.json(stats);
+    const [stats, clicksByPartner] = await Promise.all([
+      analytics.getStats(days),
+      analytics.getClickStats(days),
+    ]);
+    res.json({ ...stats, clicksByPartner });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
