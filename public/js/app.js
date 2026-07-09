@@ -615,11 +615,17 @@ function comboMatchStatusBadge(m) {
   return '<span class="combo-match-status pending">⚠️ Score non confirmé</span>';
 }
 
+const SPORT_EMOJI = { football: '⚽', nfl: '🏈', nba: '🏀', hockey: '🏒', baseball: '⚾', handball: '🤾', tennis: '🎾' };
+
 function buildComboMatch(m, sportKey) {
   const time = new Date(m.fixture.date).toLocaleString('fr-FR');
+  // Dans un combiné multi-sports, chaque match porte son propre sport (m.sport) — sinon on
+  // retombe sur le sport du groupe, comme pour les combinés mono-sport classiques.
+  const matchSport = m.sport || sportKey;
+  const sportBadge = m.sport ? `${SPORT_EMOJI[m.sport] || ''} ` : '';
   return `
-    <div class="combo-match ${m.finished ? (m.validated ? 'is-validated' : 'is-failed') : ''}" data-id="${m.fixture.id}" data-sport="${sportKey}">
-      <div class="combo-match-league">${m.fixture.league} · ${time}</div>
+    <div class="combo-match ${m.finished ? (m.validated ? 'is-validated' : 'is-failed') : ''}" data-id="${m.fixture.id}" data-sport="${matchSport}">
+      <div class="combo-match-league">${sportBadge}${m.fixture.league} · ${time}</div>
       <div class="combo-match-teams">${m.fixture.home} vs ${m.fixture.away}</div>
       <div class="combo-match-pick">✓ ${m.pick} <span class="combo-match-prob">${m.probability}%</span></div>
       ${comboMatchStatusBadge(m)}
@@ -658,7 +664,12 @@ function buildComboGroup(group) {
 }
 
 function comboMatchEndpoint(sportKey, id) {
-  return sportKey === 'football' ? `${SPORTS[sportKey].base}/fixture/${id}` : `${SPORTS[sportKey].base}/game/${id}`;
+  // sportKey inconnu (ne devrait pas arriver: chaque match d'un combiné multi porte son sport)
+  // -> repli sur football plutôt qu'un crash "Cannot read properties of undefined"
+  const sport = SPORTS[sportKey] || SPORTS.football;
+  return sportKey === 'football' || !SPORTS[sportKey]
+    ? `${sport.base}/fixture/${id}`
+    : `${sport.base}/game/${id}`;
 }
 
 function attachComboMatchClickHandlers(container) {

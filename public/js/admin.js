@@ -177,6 +177,143 @@ function renderTrafficSection({ daily, topPages, clicksByPartner }) {
     </section>`;
 }
 
+// --- Combiné manuel : le fondateur choisit lui-même les matchs du combiné du jour ---
+// La sélection persiste quand on change de sport (combinés multi-sports possibles, 2 à 5
+// matchs). Les candidats sont chargés à la demande (bouton) et non au chargement du
+// dashboard : l'analyse complète d'une journée peut prendre plus d'une minute à froid.
+const COMBO_MAX_MATCHES = 5;
+let comboSelection = []; // [{ sport, fixtureId, prob, label }]
+
+function renderManualComboSection() {
+  const sportOptions = TRACKED_SPORTS.map((s) => `<option value="${s}">${SPORT_LABEL[s]}</option>`).join('');
+  const today = new Date().toISOString().split('T')[0];
+  return `
+    <section>
+      <h2>🎯 Créer un combiné manuel</h2>
+      <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.75rem">
+        Choisis toi-même les matchs du combiné (2 à ${COMBO_MAX_MATCHES}) — la sélection est conservée quand tu
+        changes de sport, donc tu peux mélanger plusieurs disciplines dans un même combiné.
+        Sans le filtre de compétitions ni la barre des 50% des combinés automatiques ;
+        le pronostic de chaque match reste celui de l'algorithme.
+      </p>
+      <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;flex-wrap:wrap">
+        <select id="combo-sport" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0.35rem 0.6rem">
+          ${sportOptions}
+        </select>
+        <input type="date" id="combo-date" value="${today}" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0.35rem 0.6rem">
+        <button id="combo-load-btn" class="filter-btn">Charger les matchs</button>
+      </div>
+      <div id="combo-candidates"></div>
+      <div id="combo-summary" style="margin-top:0.75rem"></div>
+    </section>`;
+}
+
+function updateComboSummary() {
+  const summary = document.getElementById('combo-summary');
+  if (!summary) return;
+  if (comboSelection.length === 0) {
+    summary.innerHTML = `<span style="color:var(--muted);font-size:0.85rem">Sélectionne 2 à ${COMBO_MAX_MATCHES} matchs (tous sports confondus)</span>`;
+    return;
+  }
+  const combined = Math.round(comboSelection.reduce((acc, s) => acc * (s.prob / 100), 1) * 100);
+  const chips = comboSelection.map((s) =>
+    `<span style="background:var(--card);border:1px solid var(--border);border-radius:6px;padding:0.2rem 0.5rem;font-size:0.8rem">${SPORT_LABEL[s.sport] || s.sport} · ${escapeHtml(s.label)} (${s.prob}%)</span>`
+  ).join(' ');
+  const createBtn = comboSelection.length >= 2
+    ? `<button id="combo-create-btn" class="filter-btn active">Créer le combiné (${comboSelection.length} matchs)</button>`
+    : `<span style="color:var(--muted);font-size:0.85rem">Encore ${2 - comboSelection.length} match(s) à choisir</span>`;
+  summary.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:0.5rem">
+      <div style="display:flex;gap:0.5rem;flex-wrap:wrap">${chips}</div>
+      <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+        <span>Probabilité combinée : <strong>${combined}%</strong> (${comboSelection.length}/${COMBO_MAX_MATCHES} matchs)</span>
+        ${createBtn}
+        <span id="combo-create-result" style="font-size:0.85rem"></span>
+      </div>
+    </div>`;
+  document.getElementById('combo-create-btn')?.addEventListener('click', createManualComboFromSelection);
+}
+
+function toggleComboCandidate(cb, sport) {
+  const key = `${sport}:${cb.dataset.fixtureId}`;
+  if (cb.checked) {
+    if (comboSelection.length >= COMBO_MAX_MATCHES) {
+      cb.checked = false;
+      alert(`Maximum ${COMBO_MAX_MATCHES} matchs par combiné`);
+      return;
+    }
+    if (!comboSelection.some((s) => `${s.sport}:${s.fixtureId}` === key)) {
+      comboSelection.push({ sport, fixtureId: cb.dataset.fixtureId, prob: Number(cb.dataset.prob), label: cb.dataset.label });
+    }
+  } else {
+    comboSelection = comboSelection.filter((s) => `${s.sport}:${s.fixtureId}` !== key);
+  }
+  updateComboSummary();
+}
+
+async function loadComboCandidates() {
+  const sport = document.getElementById('combo-sport').value;
+  const date = document.getElementById('combo-date').value;
+  const container = document.getElementById('combo-candidates');
+  container.innerHTML = '<p style="color:var(--muted)">Analyse des matchs en cours… (peut prendre une minute sur un cache froid)</p>';
+  try {
+    const res = await fetch(`/api/admin/combo-candidates?sport=${sport}&date=${date}`, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Chargement impossible');
+    if (!data.candidates.length) {
+      container.innerHTML = '<p style="color:var(--muted)">Aucun match exploitable ce jour-là.</p>';
+      updateComboSummary();
+      return;
+    }
+    container.innerHTML = `
+      <table class="admin-table">
+        <thead><tr><th></th><th>Ligue</th><th>Match</th><th>Pronostic</th><th>Probabilité</th></tr></thead>
+        <tbody>
+          ${data.candidates.map((c) => {
+            const selected = comboSelection.some((s) => s.sport === sport && String(s.fixtureId) === String(c.fixtureId));
+            return `
+            <tr>
+              <td><input type="checkbox" class="combo-candidate-cb" ${selected ? 'checked' : ''} data-fixture-id="${c.fixtureId}" data-prob="${c.probability}" data-label="${escapeHtml(c.home)} — ${escapeHtml(c.away)}"></td>
+              <td>${escapeHtml(c.league || '')}</td>
+              <td>${escapeHtml(c.home)} — ${escapeHtml(c.away)}</td>
+              <td>${escapeHtml(c.pick)}</td>
+              <td>${c.probability}%</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+    document.querySelectorAll('.combo-candidate-cb').forEach((cb) => cb.addEventListener('change', () => toggleComboCandidate(cb, sport)));
+    updateComboSummary();
+  } catch (err) {
+    container.innerHTML = `<p style="color:var(--red)">Erreur : ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function createManualComboFromSelection() {
+  const date = document.getElementById('combo-date').value;
+  const resultEl = document.getElementById('combo-create-result');
+  const btn = document.getElementById('combo-create-btn');
+  btn.disabled = true;
+  resultEl.textContent = 'Création…';
+  try {
+    const res = await fetch('/api/admin/combos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ date, fixtures: comboSelection.map(({ sport, fixtureId }) => ({ sport, fixtureId })) }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Création impossible');
+    comboSelection = [];
+    document.querySelectorAll('.combo-candidate-cb').forEach((cb) => { cb.checked = false; });
+    // Pas via updateComboSummary() : la sélection vidée effacerait le message de succès
+    document.getElementById('combo-summary').innerHTML =
+      `<span style="color:var(--green)">✅ Combiné ${data.sport === 'multi' ? 'multi-sports ' : ''}créé (${data.combinedProbability}%, risque ${data.risk}) — visible dans l'onglet Combinés</span>`;
+  } catch (err) {
+    btn.disabled = false;
+    resultEl.innerHTML = `<span style="color:var(--red)">Erreur : ${escapeHtml(err.message)}</span>`;
+  }
+}
+
 async function loadDashboard(extraOnly = true, sport = 'football') {
   const user = await fetchCurrentUser();
   if (!user) {
@@ -249,6 +386,8 @@ async function loadDashboard(extraOnly = true, sport = 'football') {
 
     ${trafficSection}
 
+    ${renderManualComboSection()}
+
     ${trackedSection}
 
     <section>
@@ -272,6 +411,7 @@ async function loadDashboard(extraOnly = true, sport = 'football') {
   document.querySelectorAll('.tracked-row').forEach((row) => {
     row.addEventListener('click', () => openTrackedMatchModal(row.dataset.sport, row.dataset.fixtureId));
   });
+  document.getElementById('combo-load-btn')?.addEventListener('click', loadComboCandidates);
 }
 
 loadDashboard();

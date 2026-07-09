@@ -106,4 +106,36 @@ router.get('/users', async (req, res) => {
   }
 });
 
+// Combiné manuel : le fondateur choisit lui-même les matchs du combiné du jour depuis le
+// dashboard (au lieu de la sélection automatique). Contourne volontairement le filtre de
+// ligues et la barre des 50% — voir createManualCombo dans routes/combos.js.
+const { listComboCandidates, createManualCombo } = require('./combos');
+
+router.get('/combo-candidates', async (req, res) => {
+  try {
+    const sport = req.query.sport || 'football';
+    const date = req.query.date || new Date().toISOString().split('T')[0];
+    const candidates = await listComboCandidates(sport, date);
+    res.json({ sport, date, count: candidates.length, candidates });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post('/combos', async (req, res) => {
+  try {
+    const { date, fixtures, sport, fixtureIds } = req.body || {};
+    const comboDate = date || new Date().toISOString().split('T')[0];
+    // Nouveau format: fixtures = [{ sport, fixtureId }] (multi-sports possible, 2 à 5 matchs).
+    // Ancien format ({ sport, fixtureIds }) encore accepté pour ne rien casser.
+    const selections = Array.isArray(fixtures)
+      ? fixtures
+      : (fixtureIds || []).map((id) => ({ sport: sport || 'football', fixtureId: id }));
+    const combo = await createManualCombo(comboDate, selections);
+    res.status(201).json({ date: comboDate, ...combo });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
 module.exports = router;
