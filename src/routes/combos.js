@@ -100,7 +100,13 @@ function buildComboMatches(predictions, usedIds, leagueIds, rankFn = pickProbabi
 
   const [first, second] = candidates;
   const combinedProbability = Math.round((first.prob / 100) * (second.prob / 100) * 100);
-  const risk = combinedProbability >= 40 ? 'Faible' : combinedProbability >= 20 ? 'Moyenne' : 'Élevée';
+
+  // Barre de qualité pour Premium/VIP : un combiné sous 50% de probabilité combinée n'est
+  // tout simplement pas généré ce jour-là (pas de repli sur une paire moins bonne) — mieux
+  // vaut aucun combiné qu'un combiné médiocre pour des abonnés payants.
+  if (combinedProbability < 50) return null;
+
+  const risk = combinedProbability >= 70 ? 'Faible' : 'Moyenne';
 
   const matches = [first, second].map(({ p, prob }) => ({
     fixtureId: p.fixture.id,
