@@ -272,7 +272,7 @@ async function loadComboCandidates() {
           ${data.candidates.map((c) => {
             const selected = comboSelection.some((s) => s.sport === sport && String(s.fixtureId) === String(c.fixtureId));
             return `
-            <tr>
+            <tr class="combo-candidate-row" style="cursor:pointer" data-fixture-id="${c.fixtureId}" title="Cliquer pour voir le détail du match">
               <td><input type="checkbox" class="combo-candidate-cb" ${selected ? 'checked' : ''} data-fixture-id="${c.fixtureId}" data-prob="${c.probability}" data-label="${escapeHtml(c.home)} — ${escapeHtml(c.away)}"></td>
               <td>${escapeHtml(c.league || '')}</td>
               <td>${escapeHtml(c.home)} — ${escapeHtml(c.away)}</td>
@@ -282,7 +282,13 @@ async function loadComboCandidates() {
           }).join('')}
         </tbody>
       </table>`;
-    document.querySelectorAll('.combo-candidate-cb').forEach((cb) => cb.addEventListener('change', () => toggleComboCandidate(cb, sport)));
+    document.querySelectorAll('.combo-candidate-cb').forEach((cb) => {
+      cb.addEventListener('click', (e) => e.stopPropagation()); // ne pas ouvrir la modale en cochant
+      cb.addEventListener('change', () => toggleComboCandidate(cb, sport));
+    });
+    document.querySelectorAll('.combo-candidate-row').forEach((row) => {
+      row.addEventListener('click', () => openTrackedMatchModal(sport, row.dataset.fixtureId));
+    });
     updateComboSummary();
   } catch (err) {
     container.innerHTML = `<p style="color:var(--red)">Erreur : ${escapeHtml(err.message)}</p>`;
