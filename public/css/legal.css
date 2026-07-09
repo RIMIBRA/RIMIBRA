@@ -47,4 +47,15 @@
   border-top: 1px solid var(--border);
   margin-top: 1rem;
 }
+
+/* Mise en avant volontaire (couleur + poids) vs le reste du footer, plus discret — sert à
+   attirer l'oeil sur la page partenaires sans pour autant l'imposer dans les cartes de
+   pronostic elles-mêmes (voir public/partenaires.html) */
+.partners-disclaimer {
+  margin: 0.4rem 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--blue);
+}
+.partners-disclaimer a { color: var(--blue); text-decoration: underline; }
 .disclaimer-banner a { color: var(--muted); }
