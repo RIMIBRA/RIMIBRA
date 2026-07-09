@@ -177,6 +177,105 @@ function renderTrafficSection({ daily, topPages, clicksByPartner }) {
     </section>`;
 }
 
+// --- Combiné manuel : le fondateur choisit lui-même les matchs du combiné du jour ---
+// Les candidats sont chargés à la demande (bouton) et non au chargement du dashboard :
+// l'analyse complète d'une journée peut prendre plus d'une minute sur un cache froid.
+function renderManualComboSection() {
+  const sportOptions = TRACKED_SPORTS.map((s) => `<option value="${s}">${SPORT_LABEL[s]}</option>`).join('');
+  const today = new Date().toISOString().split('T')[0];
+  return `
+    <section>
+      <h2>🎯 Créer un combiné manuel</h2>
+      <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.75rem">
+        Choisis toi-même les matchs du combiné du jour — sans le filtre de compétitions ni la barre
+        des 50% appliqués aux combinés automatiques. Le pronostic de chaque match reste celui de l'algorithme.
+      </p>
+      <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;flex-wrap:wrap">
+        <select id="combo-sport" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0.35rem 0.6rem">
+          ${sportOptions}
+        </select>
+        <input type="date" id="combo-date" value="${today}" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0.35rem 0.6rem">
+        <button id="combo-load-btn" class="filter-btn">Charger les matchs</button>
+      </div>
+      <div id="combo-candidates"></div>
+      <div id="combo-summary" style="margin-top:0.75rem"></div>
+    </section>`;
+}
+
+function updateComboSummary() {
+  const checked = Array.from(document.querySelectorAll('.combo-candidate-cb:checked'));
+  const summary = document.getElementById('combo-summary');
+  if (checked.length < 2) {
+    summary.innerHTML = `<span style="color:var(--muted);font-size:0.85rem">Sélectionne au moins 2 matchs (${checked.length}/2)</span>`;
+    return;
+  }
+  const combined = Math.round(checked.reduce((acc, cb) => acc * (Number(cb.dataset.prob) / 100), 1) * 100);
+  summary.innerHTML = `
+    <div style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+      <span>Probabilité combinée : <strong>${combined}%</strong> (${checked.length} matchs)</span>
+      <button id="combo-create-btn" class="filter-btn active">Créer le combiné</button>
+      <span id="combo-create-result" style="font-size:0.85rem"></span>
+    </div>`;
+  document.getElementById('combo-create-btn').addEventListener('click', createManualComboFromSelection);
+}
+
+async function loadComboCandidates() {
+  const sport = document.getElementById('combo-sport').value;
+  const date = document.getElementById('combo-date').value;
+  const container = document.getElementById('combo-candidates');
+  container.innerHTML = '<p style="color:var(--muted)">Analyse des matchs en cours… (peut prendre une minute sur un cache froid)</p>';
+  try {
+    const res = await fetch(`/api/admin/combo-candidates?sport=${sport}&date=${date}`, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Chargement impossible');
+    if (!data.candidates.length) {
+      container.innerHTML = '<p style="color:var(--muted)">Aucun match exploitable ce jour-là.</p>';
+      return;
+    }
+    container.innerHTML = `
+      <table class="admin-table">
+        <thead><tr><th></th><th>Ligue</th><th>Match</th><th>Pronostic</th><th>Probabilité</th></tr></thead>
+        <tbody>
+          ${data.candidates.map((c) => `
+            <tr>
+              <td><input type="checkbox" class="combo-candidate-cb" data-fixture-id="${c.fixtureId}" data-prob="${c.probability}"></td>
+              <td>${escapeHtml(c.league || '')}</td>
+              <td>${escapeHtml(c.home)} — ${escapeHtml(c.away)}</td>
+              <td>${escapeHtml(c.pick)}</td>
+              <td>${c.probability}%</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+    document.querySelectorAll('.combo-candidate-cb').forEach((cb) => cb.addEventListener('change', updateComboSummary));
+    updateComboSummary();
+  } catch (err) {
+    container.innerHTML = `<p style="color:var(--red)">Erreur : ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+async function createManualComboFromSelection() {
+  const sport = document.getElementById('combo-sport').value;
+  const date = document.getElementById('combo-date').value;
+  const fixtureIds = Array.from(document.querySelectorAll('.combo-candidate-cb:checked')).map((cb) => cb.dataset.fixtureId);
+  const resultEl = document.getElementById('combo-create-result');
+  const btn = document.getElementById('combo-create-btn');
+  btn.disabled = true;
+  resultEl.textContent = 'Création…';
+  try {
+    const res = await fetch('/api/admin/combos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ sport, date, fixtureIds }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Création impossible');
+    resultEl.innerHTML = `<span style="color:var(--green)">✅ Combiné créé (${data.combinedProbability}%, risque ${data.risk}) — visible dans l'onglet Combinés</span>`;
+  } catch (err) {
+    btn.disabled = false;
+    resultEl.innerHTML = `<span style="color:var(--red)">Erreur : ${escapeHtml(err.message)}</span>`;
+  }
+}
+
 async function loadDashboard(extraOnly = true, sport = 'football') {
   const user = await fetchCurrentUser();
   if (!user) {
@@ -249,6 +348,8 @@ async function loadDashboard(extraOnly = true, sport = 'football') {
 
     ${trafficSection}
 
+    ${renderManualComboSection()}
+
     ${trackedSection}
 
     <section>
@@ -272,6 +373,7 @@ async function loadDashboard(extraOnly = true, sport = 'football') {
   document.querySelectorAll('.tracked-row').forEach((row) => {
     row.addEventListener('click', () => openTrackedMatchModal(row.dataset.sport, row.dataset.fixtureId));
   });
+  document.getElementById('combo-load-btn')?.addEventListener('click', loadComboCandidates);
 }
 
 loadDashboard();

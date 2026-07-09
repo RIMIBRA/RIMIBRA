@@ -119,6 +119,61 @@ function buildComboMatches(predictions, usedIds, leagueIds, rankFn = pickProbabi
   return { matches, combinedProbability, risk };
 }
 
+// Liste les matchs du jour utilisables dans un combiné manuel (voir createManualCombo) —
+// TOUS les matchs analysés avec des probabilités, sans le filtre de ligues automatique :
+// le fondateur choisit librement depuis le dashboard admin.
+async function listComboCandidates(sportKey, date) {
+  const sport = SPORTS.find((s) => s.key === sportKey);
+  if (!sport) throw new Error(`Sport inconnu : ${sportKey}`);
+  const { results } = await sport.analyzeDay(date);
+  return results
+    .filter((p) => !p.error && !p.insufficientData && p.matchState !== 'finished' && p.probabilities)
+    .map((p) => ({
+      fixtureId: p.fixture.id,
+      home: p.fixture.home,
+      away: p.fixture.away,
+      league: p.fixture.league,
+      pick: p.recommendation.pick,
+      confidence: p.recommendation.confidence,
+      probability: pickProbability(p),
+    }))
+    .sort((a, b) => b.probability - a.probability);
+}
+
+// Combiné créé manuellement par le fondateur (dashboard admin) — contourne volontairement le
+// filtre de ligues ET la barre des 50% de buildComboMatches : un choix humain explicite prime
+// sur les règles automatiques. Le pick de chaque match reste celui de l'algorithme (le
+// fondateur choisit LES MATCHS, pas le pronostic).
+async function createManualCombo(sportKey, date, fixtureIds) {
+  const sport = SPORTS.find((s) => s.key === sportKey);
+  if (!sport) throw new Error(`Sport inconnu : ${sportKey}`);
+  if (!Array.isArray(fixtureIds) || fixtureIds.length < 2) {
+    throw new Error('Au moins 2 matchs sont requis pour un combiné');
+  }
+
+  const { results } = await sport.analyzeDay(date);
+  const matches = fixtureIds.map((id) => {
+    const p = results.find((r) => String(r.fixture?.id) === String(id));
+    if (!p) throw new Error(`Match ${id} introuvable dans l'analyse du ${date}`);
+    if (p.error || !p.probabilities || p.matchState === 'finished') {
+      throw new Error(`Match ${id} inutilisable (terminé ou sans probabilités exploitables)`);
+    }
+    return {
+      fixtureId: p.fixture.id,
+      fixture: p.fixture,
+      pick: p.recommendation.pick,
+      confidence: p.recommendation.confidence,
+      probability: pickProbability(p),
+    };
+  });
+
+  const combinedProbability = Math.round(matches.reduce((acc, m) => acc * (m.probability / 100), 1) * 100);
+  const risk = combinedProbability >= 70 ? 'Faible' : combinedProbability >= 50 ? 'Moyenne' : 'Élevée';
+
+  await saveCombo(date, sport.key, sport.label, matches, combinedProbability, risk);
+  return { matches, combinedProbability, risk };
+}
+
 async function enrichMatchStatus(sport, match) {
   try {
     const raw = await sport.byId(match.fixtureId);
@@ -300,3 +355,8 @@ module.exports.summarize = summarize;
 module.exports.addDays = addDays;
 module.exports.hasMediaCoverage = hasMediaCoverage;
 module.exports.footballComboRank = footballComboRank;
+// Réutilisé par routes/admin.js (forçage manuel d'un combiné) pour ne pas dupliquer le mapping
+// sport -> fonction d'analyse déjà défini ici.
+module.exports.SPORTS = SPORTS;
+module.exports.listComboCandidates = listComboCandidates;
+module.exports.createManualCombo = createManualCombo;
