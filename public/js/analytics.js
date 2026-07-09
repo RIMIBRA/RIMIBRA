@@ -7,3 +7,16 @@ fetch('/api/analytics/pageview', {
   body: JSON.stringify({ path: location.pathname }),
   keepalive: true,
 }).catch(() => {});
+
+// Clic sur un bouton partenaire (voir public/partenaires.html) — ne bloque jamais l'ouverture
+// du lien d'affiliation, juste un signal fire-and-forget avant que le nouvel onglet ne s'ouvre.
+document.querySelectorAll('.partner-cta[data-partner]').forEach((link) => {
+  link.addEventListener('click', () => {
+    fetch('/api/analytics/click', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ partner: link.dataset.partner, path: location.pathname }),
+      keepalive: true,
+    }).catch(() => {});
+  });
+});
