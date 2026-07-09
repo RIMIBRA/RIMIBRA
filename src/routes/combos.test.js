@@ -1,4 +1,4 @@
-const { pickProbability, isComboCandidate, buildComboMatches, summarize, addDays, hasMediaCoverage, footballComboRank } = require('./combos');
+const { pickProbability, isComboCandidate, buildComboMatches, summarize, addDays, hasMediaCoverage, footballComboRank, buildMultiComboMatches, COMBO_MAX_MATCHES } = require('./combos');
 
 function fakePrediction({
   id, pick, home = 60, draw = 20, away = 20, finished = false, error = false, insufficientData = false,
@@ -198,6 +198,50 @@ describe('footballComboRank', () => {
   test('does not apply the friendly bonus outside league 667', () => {
     const p = fakePrediction({ id: 1, pick: '1 (Domicile)', home: 60, btts: 50, leagueId: 1, webSources: { forebet: true } });
     expect(footballComboRank(p)).toBeCloseTo(50 * 0.7 + 60 * 0.3, 5);
+  });
+});
+
+describe('buildMultiComboMatches', () => {
+  // Candidat multi-sports tel que produit par collectMultiSportCandidates : { p, sportKey, prob }
+  function fakeCandidate(id, sportKey, prob) {
+    return { p: fakePrediction({ id, pick: '1 (Domicile)', home: prob }), sportKey, prob };
+  }
+
+  test('returns null with fewer than 2 candidates', () => {
+    expect(buildMultiComboMatches([fakeCandidate(1, 'football', 90)])).toBeNull();
+  });
+
+  test('returns null when even the best pair is under 50% combined', () => {
+    const candidates = [fakeCandidate(1, 'football', 60), fakeCandidate(2, 'nba', 60)]; // 36%
+    expect(buildMultiComboMatches(candidates)).toBeNull();
+  });
+
+  test('mixes sports and tags each match with its own sport', () => {
+    const candidates = [fakeCandidate(1, 'tennis', 90), fakeCandidate(2, 'football', 80)]; // 72%
+    const result = buildMultiComboMatches(candidates);
+    expect(result.matches.map((m) => m.sport)).toEqual(['tennis', 'football']);
+    expect(result.combinedProbability).toBe(72);
+    expect(result.risk).toBe('Faible');
+  });
+
+  test('keeps adding matches while combined probability stays above 50%', () => {
+    // 95 * 90 * 88 * 85 = ~64% -> 4 matchs ; ajouter le 5e (60%) tomberait à ~38% -> exclu
+    const candidates = [
+      fakeCandidate(1, 'football', 95),
+      fakeCandidate(2, 'nba', 90),
+      fakeCandidate(3, 'tennis', 88),
+      fakeCandidate(4, 'hockey', 85),
+      fakeCandidate(5, 'nfl', 60),
+    ];
+    const result = buildMultiComboMatches(candidates);
+    expect(result.matches).toHaveLength(4);
+    expect(result.combinedProbability).toBeGreaterThanOrEqual(50);
+  });
+
+  test(`never exceeds ${COMBO_MAX_MATCHES} matches even when more would stay above 50%`, () => {
+    const candidates = [1, 2, 3, 4, 5, 6, 7].map((i) => fakeCandidate(i, 'football', 99));
+    const result = buildMultiComboMatches(candidates);
+    expect(result.matches).toHaveLength(COMBO_MAX_MATCHES);
   });
 });
 

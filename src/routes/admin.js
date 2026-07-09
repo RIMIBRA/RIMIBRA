@@ -124,10 +124,15 @@ router.get('/combo-candidates', async (req, res) => {
 
 router.post('/combos', async (req, res) => {
   try {
-    const { sport = 'football', date, fixtureIds } = req.body || {};
+    const { date, fixtures, sport, fixtureIds } = req.body || {};
     const comboDate = date || new Date().toISOString().split('T')[0];
-    const combo = await createManualCombo(sport, comboDate, fixtureIds);
-    res.status(201).json({ sport, date: comboDate, ...combo });
+    // Nouveau format: fixtures = [{ sport, fixtureId }] (multi-sports possible, 2 à 5 matchs).
+    // Ancien format ({ sport, fixtureIds }) encore accepté pour ne rien casser.
+    const selections = Array.isArray(fixtures)
+      ? fixtures
+      : (fixtureIds || []).map((id) => ({ sport: sport || 'football', fixtureId: id }));
+    const combo = await createManualCombo(comboDate, selections);
+    res.status(201).json({ date: comboDate, ...combo });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
