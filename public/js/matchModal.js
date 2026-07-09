@@ -57,6 +57,50 @@ function renderFormBadges(details) {
   return details.map((d) => `<span class="form-badge ${d.result}" title="${d.opponent}: ${d.scored}-${d.conceded}">${d.result}</span>`).join('');
 }
 
+function formRecord(details) {
+  if (!details?.length) return null;
+  const w = details.filter((d) => d.result === 'W').length;
+  const d = details.filter((d) => d.result === 'D').length;
+  const l = details.filter((d) => d.result === 'L').length;
+  return { w, d, l, n: details.length };
+}
+
+// Synthèse en une ou deux phrases de la forme récente, des absences et du H2H — réutilise
+// uniquement des données déjà calculées par le breakdown (rien de nouveau côté serveur), pour
+// donner un aperçu lisible avant de détailler chaque section plus bas dans la modale.
+function buildMatchComment(p) {
+  const b = p.breakdown;
+  if (!b) return '';
+  const parts = [];
+
+  const homeForm = formRecord(b.form?.home?.details);
+  const awayForm = formRecord(b.form?.away?.details);
+  if (homeForm && awayForm) {
+    const homePts = homeForm.w * 3 + homeForm.d;
+    const awayPts = awayForm.w * 3 + awayForm.d;
+    if (Math.abs(homePts - awayPts) >= 3) {
+      const better = homePts > awayPts ? p.fixture.home : p.fixture.away;
+      const rec = homePts > awayPts ? homeForm : awayForm;
+      parts.push(`Forme récente favorable à ${better} (${rec.w}V-${rec.d}N-${rec.l}D sur les ${rec.n} derniers matchs).`);
+    } else {
+      parts.push(`Forme récente équilibrée entre les deux équipes sur leurs ${homeForm.n} derniers matchs.`);
+    }
+  }
+
+  const homeInj = b.injuries?.team1?.count ?? 0;
+  const awayInj = b.injuries?.team2?.count ?? 0;
+  if (Math.abs(homeInj - awayInj) >= 2) {
+    const weaker = homeInj > awayInj ? p.fixture.home : p.fixture.away;
+    parts.push(`Effectif de ${weaker} fragilisé par ${Math.max(homeInj, awayInj)} absence(s) clé(s).`);
+  } else if (homeInj === 0 && awayInj === 0) {
+    parts.push(`Aucune absence majeure signalée des deux côtés.`);
+  }
+
+  if (b.h2h?.summary) parts.push(b.h2h.summary);
+
+  return parts.join(' ');
+}
+
 // Encart d'incitation à l'abonnement — deux instances possibles par match : prédiction de
 // buts (plan premium) et détail complet (plan VIP). Voir auth/breakdownGate.js côté serveur.
 function subscribeLockBox(title, description) {
@@ -88,6 +132,8 @@ function buildModalContent(p) {
   return `
     <div class="modal-title">${p.fixture.home} vs ${p.fixture.away}</div>
     <div class="modal-league">${p.fixture.league} · ${time}</div>
+
+    ${p.breakdown ? `<p class="match-comment">${buildMatchComment(p)}</p>` : ''}
 
     <div class="detail-section">
       <h3>Probabilités</h3>
