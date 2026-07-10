@@ -194,9 +194,9 @@ function renderManualComboSection() {
       <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.75rem">
         Choisis toi-même les matchs du combiné (2 à ${COMBO_MAX_MATCHES}) — la sélection est conservée quand tu
         changes de sport, donc tu peux mélanger plusieurs disciplines dans un même combiné.
-        Pour chaque match, choisis aussi le marché ciblé (1/X/2, BTTS, total de buts — ce dernier
-        uniquement disponible pour le foot). Sans le filtre de compétitions ni la barre des 50%
-        des combinés automatiques.
+        Pour chaque match, choisis aussi le marché ciblé (1/X/2, BTTS et total de buts pour le foot,
+        nombre de sets pour le tennis — via cotes réelles). Sans le filtre de compétitions ni la
+        barre des 50% des combinés automatiques.
       </p>
       <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;flex-wrap:wrap">
         <select id="combo-sport" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0.35rem 0.6rem">
@@ -227,6 +227,11 @@ function resolveBetPreview(candidate, betType) {
   if (betType === 'btts_no') return g ? { pick: 'BTTS Non', prob: 100 - g.btts } : null;
   if (betType === 'over25') return g ? { pick: '+2,5 buts', prob: g.over25 } : null;
   if (betType === 'under25') return g ? { pick: '-2,5 buts', prob: 100 - g.over25 } : null;
+  if (betType.startsWith('sets_')) {
+    const m = /^sets_(over|under)_([\d.]+)$/.exec(betType);
+    const entry = m && candidate.setsMarkets?.find((s) => s.side === m[1] && s.line === m[2]);
+    return entry ? { pick: `${m[1] === 'over' ? '+' : '-'}${m[2]} sets`, prob: entry.probability } : null;
+  }
   return { pick: candidate.pick, prob: candidate.probability };
 }
 
@@ -244,6 +249,16 @@ function buildBetTypeOptions(c, selected) {
       { v: 'over25', label: `Total buts · +2,5 (${c.goalPrediction.over25}%)` },
       { v: 'under25', label: `Total buts · -2,5 (${100 - c.goalPrediction.over25}%)` },
     );
+  }
+  // Nombre de sets (tennis) : cotes réelles, une option par ligne dispo pour ce match (2.5,
+  // 3.5, 4.5 selon best-of-3/5) — voir api/tennisClient.js getSetsMarkets.
+  if (c.setsMarkets?.length) {
+    c.setsMarkets
+      .slice()
+      .sort((a, b) => Number(a.line) - Number(b.line) || (a.side === 'over' ? -1 : 1))
+      .forEach((s) => {
+        opts.push({ v: `sets_${s.side}_${s.line}`, label: `Total sets · ${s.side === 'over' ? '+' : '-'}${s.line} (~${s.probability}%)` });
+      });
   }
   return opts.map((o) => `<option value="${o.v}" ${o.v === selected ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
 }

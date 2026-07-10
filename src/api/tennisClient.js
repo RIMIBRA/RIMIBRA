@@ -141,6 +141,37 @@ async function getOdds(matchId) {
   return data[String(matchId)] || null;
 }
 
+function averageOdd(bookmakers) {
+  const values = Object.values(bookmakers || {}).map(Number).filter((n) => !Number.isNaN(n));
+  if (values.length === 0) return null;
+  return values.reduce((s, o) => s + o, 0) / values.length;
+}
+
+// Toutes les lignes "nombre de sets" disponibles pour un match (marché "Over/Under" de l'API =
+// total de SETS, pas de jeux — voir le commentaire dans routes/tennisPredictions.js, confirmé
+// par des lignes fixes 3.5/4.5 sur les matchs en 5 sets). Contrairement à l'alternative de pari
+// de tennisPredictions.js (qui n'en retient qu'une seule, "équilibrée"), ici on expose TOUTES
+// les lignes : sert au combiné manuel, où le fondateur choisit librement le marché par match.
+// probability = probabilité implicite de la cote moyenne (100/cote) — inclut la marge du
+// bookmaker (légèrement surestimée), mais c'est la seule donnée réelle disponible pour ce
+// marché, contrairement au foot où l'algo calcule ses propres probabilités (buts, Poisson).
+async function getSetsMarkets(matchId) {
+  const odds = await getOdds(matchId);
+  const overUnder = odds?.['Over/Under'];
+  if (!overUnder) return null;
+
+  const markets = [];
+  for (const [sideKey, side] of [['Over/Under Over', 'over'], ['Over/Under Under', 'under']]) {
+    const lines = overUnder[sideKey];
+    if (!lines) continue;
+    for (const [line, bookmakers] of Object.entries(lines)) {
+      const odd = averageOdd(bookmakers);
+      if (odd != null) markets.push({ side, line, probability: Math.round(100 / odd) });
+    }
+  }
+  return markets.length > 0 ? markets : null;
+}
+
 module.exports = {
   getGamesByDate,
   getTeamLastGames,
@@ -148,6 +179,7 @@ module.exports = {
   getRawGames,
   getGameById,
   getOdds,
+  getSetsMarkets,
   getDailyRequestCount: () => cache.getDailyRequestCount(NAMESPACE),
   DAILY_LIMIT,
 };

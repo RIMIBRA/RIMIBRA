@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { canAccessSport, comboLimitFor, hasAccess } = require('../auth/tiers');
 const { getCombosForSport, saveCombo } = require('../db/combos');
+const { mapWithConcurrency } = require('../utils/concurrency');
 
 const football = require('../algorithm/predictor');
 const nfl = require('../algorithm/nflPredictor');
@@ -64,17 +65,39 @@ const GOAL_MARKETS = {
   under25: (g) => ({ pick: '-2,5 buts', probability: 100 - g.over25 }),
 };
 
+// Marché "nombre de sets" (tennis uniquement) — betType encode la ligne choisie, ex.
+// "sets_over_2.5" / "sets_under_3.5" (voir api/tennisClient.js getSetsMarkets : cotes réelles
+// du marché "Over/Under" de l'API, qui est un total de SETS pour le tennis, pas de jeux). Pas
+// de modèle maison pour ce marché (contrairement aux buts au foot) -> probabilité implicite de
+// la cote bookmaker, seule donnée réelle disponible.
+async function resolveSetsMarket(fixtureId, betType) {
+  const m = /^sets_(over|under)_([\d.]+)$/.exec(betType);
+  if (!m) return null;
+  const [, side, line] = m;
+  const markets = await tennisApi.getSetsMarkets(fixtureId).catch(() => null);
+  const entry = markets?.find((mk) => mk.side === side && mk.line === line);
+  if (!entry) {
+    throw new Error(`Marché "${betType}" indisponible (pas de cote à cette ligne pour ce match)`);
+  }
+  return { pick: `${side === 'over' ? '+' : '-'}${line} sets`, probability: entry.probability };
+}
+
 // Résout le pick + la probabilité affichée pour un match d'un combiné manuel, selon le marché
 // choisi par le fondateur (betType) — 'algo'/absent conserve l'ancien comportement (le pick
 // recommandé par l'algo). '1'/'X'/'2' piochent directement dans les probabilités 1X2 déjà
 // calculées pour ce match, quel que soit le sport.
-function resolveBetSelection(p, betType) {
+async function resolveBetSelection(p, betType) {
   if (!betType || betType === 'algo') {
     return { pick: p.recommendation.pick, probability: pickProbability(p) };
   }
   if (betType === '1') return { pick: '1 (Domicile)', probability: p.probabilities.home };
   if (betType === 'X') return { pick: 'X (Nul)', probability: p.probabilities.draw ?? 0 };
   if (betType === '2') return { pick: '2 (Extérieur)', probability: p.probabilities.away };
+  if (betType.startsWith('sets_')) {
+    const result = await resolveSetsMarket(p.fixture.id, betType);
+    if (!result) throw new Error(`Marché "${betType}" inconnu`);
+    return result;
+  }
   const goalMarket = GOAL_MARKETS[betType];
   if (!goalMarket) throw new Error(`Marché "${betType}" inconnu`);
   if (!p.goalPrediction) {
@@ -156,22 +179,28 @@ async function listComboCandidates(sportKey, date) {
   const sport = SPORTS.find((s) => s.key === sportKey);
   if (!sport) throw new Error(`Sport inconnu : ${sportKey}`);
   const { results } = await sport.analyzeDay(date);
-  return results
-    .filter((p) => !p.error && !p.insufficientData && p.matchState !== 'finished' && p.probabilities)
-    .map((p) => ({
-      fixtureId: p.fixture.id,
-      home: p.fixture.home,
-      away: p.fixture.away,
-      league: p.fixture.league,
-      pick: p.recommendation.pick,
-      confidence: p.recommendation.confidence,
-      probability: pickProbability(p),
-      // Exposés pour que le dashboard admin propose un marché par match (1/X/2, BTTS, total de
-      // buts) au lieu de figer le pick recommandé par l'algo — voir resolveBetSelection.
-      probabilities: p.probabilities,
-      goalPrediction: p.goalPrediction ? { btts: p.goalPrediction.btts, over25: p.goalPrediction.over25 } : null,
-    }))
-    .sort((a, b) => b.probability - a.probability);
+  const candidates = results.filter((p) => !p.error && !p.insufficientData && p.matchState !== 'finished' && p.probabilities);
+
+  // Cotes réelles "nombre de sets" (tennis uniquement, voir resolveSetsMarket) — un appel par
+  // match, concurrence limitée comme pour l'analyse elle-même (mapWithConcurrency) plutôt que
+  // tout lancer d'un coup ; quota tennis large donc pas un souci de coût, juste de politesse
+  // envers l'API externe.
+  const withMarkets = await mapWithConcurrency(candidates, 10, async (p) => ({
+    fixtureId: p.fixture.id,
+    home: p.fixture.home,
+    away: p.fixture.away,
+    league: p.fixture.league,
+    pick: p.recommendation.pick,
+    confidence: p.recommendation.confidence,
+    probability: pickProbability(p),
+    // Exposés pour que le dashboard admin propose un marché par match (1/X/2, BTTS, total de
+    // buts, nombre de sets) au lieu de figer le pick recommandé par l'algo — voir resolveBetSelection.
+    probabilities: p.probabilities,
+    goalPrediction: p.goalPrediction ? { btts: p.goalPrediction.btts, over25: p.goalPrediction.over25 } : null,
+    setsMarkets: sportKey === 'tennis' ? await tennisApi.getSetsMarkets(p.fixture.id).catch(() => null) : null,
+  }));
+
+  return withMarkets.sort((a, b) => b.probability - a.probability);
 }
 
 // Combinés inter-sports : stockés en base sous sport='multi', chaque match du combiné porte
@@ -184,8 +213,9 @@ const COMBO_MAX_MATCHES = 5;
 // filtre de ligues ET la barre des 50% des combinés automatiques : un choix humain explicite
 // prime sur les règles. selections: [{ sport, fixtureId, betType }], 2 à 5 matchs, éventuellement
 // de sports différents (combiné enregistré sous 'multi' dans ce cas). betType (optionnel, par
-// match) choisit le marché ciblé — 1/X/2/BTTS/total de buts, voir resolveBetSelection ; absent ->
-// pick recommandé par l'algo, comme avant. options.special marque le combiné pour la section
+// match) choisit le marché ciblé — 1/X/2, BTTS/total de buts (foot), nombre de sets (tennis),
+// voir resolveBetSelection ; absent -> pick recommandé par l'algo, comme avant.
+// options.special marque le combiné pour la section
 // "Spécial" (voir getSpecialComboSeries) au lieu de son onglet sport/multi habituel.
 async function createManualCombo(date, selections, options = {}) {
   if (!Array.isArray(selections) || selections.length < 2) {
@@ -203,13 +233,13 @@ async function createManualCombo(date, selections, options = {}) {
     analyses[key] = (await sport.analyzeDay(date)).results;
   }
 
-  const matches = selections.map(({ sport: key, fixtureId, betType }) => {
+  const matches = await Promise.all(selections.map(async ({ sport: key, fixtureId, betType }) => {
     const p = analyses[key].find((r) => String(r.fixture?.id) === String(fixtureId));
     if (!p) throw new Error(`Match ${fixtureId} introuvable dans l'analyse ${key} du ${date}`);
     if (p.error || !p.probabilities || p.matchState === 'finished') {
       throw new Error(`Match ${fixtureId} inutilisable (terminé ou sans probabilités exploitables)`);
     }
-    const { pick, probability } = resolveBetSelection(p, betType);
+    const { pick, probability } = await resolveBetSelection(p, betType);
     return {
       fixtureId: p.fixture.id,
       fixture: p.fixture,
@@ -219,7 +249,7 @@ async function createManualCombo(date, selections, options = {}) {
       probability,
       betType: betType || 'algo',
     };
-  });
+  }));
 
   const combinedProbability = Math.round(matches.reduce((acc, m) => acc * (m.probability / 100), 1) * 100);
   const risk = combinedProbability >= 70 ? 'Faible' : combinedProbability >= 50 ? 'Moyenne' : 'Élevée';
