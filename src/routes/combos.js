@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { canAccessSport, comboLimitFor } = require('../auth/tiers');
+const { canAccessSport, comboLimitFor, hasAccess } = require('../auth/tiers');
 const { getCombosForSport, saveCombo } = require('../db/combos');
 
 const football = require('../algorithm/predictor');
@@ -51,6 +51,36 @@ function pickProbability(p) {
 function isComboCandidate(p, usedIds, leagueIds) {
   if (leagueIds && !leagueIds.has(p.fixture.leagueId)) return false;
   return !p.error && !p.insufficientData && p.matchState !== 'finished' && p.probabilities && !usedIds.has(String(p.fixture.id));
+}
+
+// Marchés qu'un combiné manuel peut cibler par match (voir createManualCombo) — BTTS et total
+// de buts viennent de la prédiction Poisson (goalPrediction, voir algorithm/goals.js), calculée
+// uniquement pour le foot avec données de forme suffisantes. Absente -> erreur explicite plutôt
+// qu'une probabilité inventée pour les sports/matchs qui n'ont pas cette donnée.
+const GOAL_MARKETS = {
+  btts_yes: (g) => ({ pick: 'BTTS Oui', probability: g.btts }),
+  btts_no: (g) => ({ pick: 'BTTS Non', probability: 100 - g.btts }),
+  over25: (g) => ({ pick: '+2,5 buts', probability: g.over25 }),
+  under25: (g) => ({ pick: '-2,5 buts', probability: 100 - g.over25 }),
+};
+
+// Résout le pick + la probabilité affichée pour un match d'un combiné manuel, selon le marché
+// choisi par le fondateur (betType) — 'algo'/absent conserve l'ancien comportement (le pick
+// recommandé par l'algo). '1'/'X'/'2' piochent directement dans les probabilités 1X2 déjà
+// calculées pour ce match, quel que soit le sport.
+function resolveBetSelection(p, betType) {
+  if (!betType || betType === 'algo') {
+    return { pick: p.recommendation.pick, probability: pickProbability(p) };
+  }
+  if (betType === '1') return { pick: '1 (Domicile)', probability: p.probabilities.home };
+  if (betType === 'X') return { pick: 'X (Nul)', probability: p.probabilities.draw ?? 0 };
+  if (betType === '2') return { pick: '2 (Extérieur)', probability: p.probabilities.away };
+  const goalMarket = GOAL_MARKETS[betType];
+  if (!goalMarket) throw new Error(`Marché "${betType}" inconnu`);
+  if (!p.goalPrediction) {
+    throw new Error(`Marché "${betType}" indisponible pour ${p.fixture.home} - ${p.fixture.away} (pas de prédiction de buts pour ce match)`);
+  }
+  return goalMarket(p.goalPrediction);
 }
 
 // Un match a de la "couverture média" s'il est suivi par au moins une source de cotes/pronostics
@@ -136,6 +166,10 @@ async function listComboCandidates(sportKey, date) {
       pick: p.recommendation.pick,
       confidence: p.recommendation.confidence,
       probability: pickProbability(p),
+      // Exposés pour que le dashboard admin propose un marché par match (1/X/2, BTTS, total de
+      // buts) au lieu de figer le pick recommandé par l'algo — voir resolveBetSelection.
+      probabilities: p.probabilities,
+      goalPrediction: p.goalPrediction ? { btts: p.goalPrediction.btts, over25: p.goalPrediction.over25 } : null,
     }))
     .sort((a, b) => b.probability - a.probability);
 }
@@ -143,14 +177,17 @@ async function listComboCandidates(sportKey, date) {
 // Combinés inter-sports : stockés en base sous sport='multi', chaque match du combiné porte
 // alors son propre champ `sport` (voir enrichMatchStatus pour la résolution des résultats).
 const MULTI_LABEL = '🌍 Multi-sports';
+const SPECIAL_LABEL = '🌟 Spécial';
 const COMBO_MAX_MATCHES = 5;
 
 // Combiné créé manuellement par le fondateur (dashboard admin) — contourne volontairement le
 // filtre de ligues ET la barre des 50% des combinés automatiques : un choix humain explicite
-// prime sur les règles. Le pick de chaque match reste celui de l'algorithme (le fondateur
-// choisit LES MATCHS, pas le pronostic). selections: [{ sport, fixtureId }], 2 à 5 matchs,
-// éventuellement de sports différents (combiné enregistré sous 'multi' dans ce cas).
-async function createManualCombo(date, selections) {
+// prime sur les règles. selections: [{ sport, fixtureId, betType }], 2 à 5 matchs, éventuellement
+// de sports différents (combiné enregistré sous 'multi' dans ce cas). betType (optionnel, par
+// match) choisit le marché ciblé — 1/X/2/BTTS/total de buts, voir resolveBetSelection ; absent ->
+// pick recommandé par l'algo, comme avant. options.special marque le combiné pour la section
+// "Spécial" (voir getSpecialComboSeries) au lieu de son onglet sport/multi habituel.
+async function createManualCombo(date, selections, options = {}) {
   if (!Array.isArray(selections) || selections.length < 2) {
     throw new Error('Au moins 2 matchs sont requis pour un combiné');
   }
@@ -166,28 +203,31 @@ async function createManualCombo(date, selections) {
     analyses[key] = (await sport.analyzeDay(date)).results;
   }
 
-  const matches = selections.map(({ sport: key, fixtureId }) => {
+  const matches = selections.map(({ sport: key, fixtureId, betType }) => {
     const p = analyses[key].find((r) => String(r.fixture?.id) === String(fixtureId));
     if (!p) throw new Error(`Match ${fixtureId} introuvable dans l'analyse ${key} du ${date}`);
     if (p.error || !p.probabilities || p.matchState === 'finished') {
       throw new Error(`Match ${fixtureId} inutilisable (terminé ou sans probabilités exploitables)`);
     }
+    const { pick, probability } = resolveBetSelection(p, betType);
     return {
       fixtureId: p.fixture.id,
       fixture: p.fixture,
       sport: key,
-      pick: p.recommendation.pick,
+      pick,
       confidence: p.recommendation.confidence,
-      probability: pickProbability(p),
+      probability,
+      betType: betType || 'algo',
     };
   });
 
   const combinedProbability = Math.round(matches.reduce((acc, m) => acc * (m.probability / 100), 1) * 100);
   const risk = combinedProbability >= 70 ? 'Faible' : combinedProbability >= 50 ? 'Moyenne' : 'Élevée';
 
-  const singleSport = sportKeys.length === 1 ? SPORTS.find((s) => s.key === sportKeys[0]) : null;
-  const comboSport = singleSport ? singleSport.key : 'multi';
-  const comboLabel = singleSport ? singleSport.label : MULTI_LABEL;
+  const special = !!options.special;
+  const singleSport = !special && sportKeys.length === 1 ? SPORTS.find((s) => s.key === sportKeys[0]) : null;
+  const comboSport = special ? 'special' : (singleSport ? singleSport.key : 'multi');
+  const comboLabel = special ? SPECIAL_LABEL : (singleSport ? singleSport.label : MULTI_LABEL);
 
   await saveCombo(date, comboSport, comboLabel, matches, combinedProbability, risk);
   return { sport: comboSport, matches, combinedProbability, risk };
@@ -278,6 +318,24 @@ async function getOrCreateMultiComboSeries(date) {
     }
   }
 
+  return enriched;
+}
+
+// Combinés spéciaux : mis en avant par le fondateur (createManualCombo avec options.special),
+// jamais générés automatiquement — juste l'historique du jour enrichi (comme pour le multi-
+// sports), sans logique "en générer un nouveau si le dernier est résolu".
+async function getSpecialComboSeries(date) {
+  const stored = await getCombosForSport(date, 'special');
+  const enriched = [];
+  for (const row of stored) {
+    const matches = await Promise.all(row.matches.map((m) => enrichMatchStatus(null, m)));
+    enriched.push({
+      matches,
+      combinedProbability: row.combined_probability,
+      risk: row.risk,
+      ...summarize(matches),
+    });
+  }
   return enriched;
 }
 
@@ -430,6 +488,25 @@ router.get('/today', async (req, res) => {
 
     const limitedGroups = limit === Infinity ? groups : groups.slice(0, limit);
 
+    // Combinés spéciaux (voir createManualCombo options.special) : section à part, réservée
+    // Premium/VIP comme les filtres Top 3/Top 2 (voir tiers.js hasAccess) — indépendante de
+    // comboLimitFor, qui ne concerne que le nombre de groupes par sport. specialLocked signale
+    // au client qu'il en existe aujourd'hui sans les révéler, pour l'inciter à passer Premium/VIP.
+    let special = null;
+    let specialLocked = false;
+    try {
+      const specialSeries = await getSpecialComboSeries(date);
+      if (specialSeries.length > 0) {
+        if (isAdmin || hasAccess(plan, 'premium')) {
+          special = { sport: SPECIAL_LABEL, sportKey: 'special', combos: specialSeries };
+        } else {
+          specialLocked = true;
+        }
+      }
+    } catch {
+      // une panne sur les combinés spéciaux ne doit jamais casser l'affichage du reste
+    }
+
     // Désactivé temporairement (a surchargé le serveur en lançant trop de scraping
     // concurrent) — à réactiver une fois la file testée plus prudemment.
     // if (!requestedDate) prewarmFutureDays(date);
@@ -439,6 +516,8 @@ router.get('/today', async (req, res) => {
       groups: limitedGroups,
       totalAvailable: groups.length,
       limit: limit === Infinity ? null : limit,
+      special,
+      specialLocked,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -489,3 +568,6 @@ module.exports.createManualCombo = createManualCombo;
 module.exports.buildMultiComboMatches = buildMultiComboMatches;
 module.exports.COMBO_MAX_MATCHES = COMBO_MAX_MATCHES;
 module.exports.MULTI_LABEL = MULTI_LABEL;
+module.exports.SPECIAL_LABEL = SPECIAL_LABEL;
+module.exports.resolveBetSelection = resolveBetSelection;
+module.exports.getSpecialComboSeries = getSpecialComboSeries;

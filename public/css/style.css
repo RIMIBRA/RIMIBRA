@@ -560,6 +560,22 @@ main {
 .combo-card.combo-lost { border-color: var(--red); opacity: 0.85; }
 .combo-card.combo-lost .combo-progress { color: var(--red); }
 
+/* Section "Spécial" : combinés choisis à la main par le fondateur, mis en avant avec un
+   accent doré pour se distinguer des groupes par sport générés automatiquement. */
+.combo-special-group .section-title { color: var(--yellow); }
+.combo-special-group .combo-card {
+  border-color: var(--yellow);
+  box-shadow: 0 0 0 1px rgba(210, 153, 34, 0.25);
+}
+.combo-special-group.combo-locked {
+  border: 1px dashed var(--yellow);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+.combo-special-group.combo-locked .section-title { margin-bottom: 0; }
+.combo-special-group.combo-locked a { color: var(--yellow); }
+
 @media (max-width: 600px) {
   .grid-section { grid-template-columns: 1fr; }
   .grid-2 { grid-template-columns: 1fr; }

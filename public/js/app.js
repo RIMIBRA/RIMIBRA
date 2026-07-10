@@ -597,7 +597,7 @@ async function loadCombos(date) {
         🔒 ${data.groups.length}/${data.totalAvailable} sports affichés (plan Premium limité à ${data.limit}) — passe VIP pour tous les voir.
       </p>` : '';
 
-    grid.innerHTML = limitNote + data.groups.map(buildComboGroup).join('');
+    grid.innerHTML = limitNote + buildSpecialSection(data) + data.groups.map((g) => buildComboGroup(g)).join('');
     attachComboMatchClickHandlers(grid);
   } catch (err) {
     if (currentSport !== requestSport) return;
@@ -654,13 +654,35 @@ function buildComboCard(combo, sequence, sportKey) {
     </div>`;
 }
 
-function buildComboGroup(group) {
+function buildComboGroup(group, extraClass = '') {
   const cards = group.combos.map((c, i) => buildComboCard(c, i + 1, group.sportKey)).reverse().join(''); // le plus récent en premier
   return `
-    <div class="combo-sport-group">
+    <div class="combo-sport-group ${extraClass}">
       <h2 class="section-title">${group.sport} (${group.combos.length} combiné${group.combos.length > 1 ? 's' : ''} aujourd'hui)</h2>
       <div class="grid-section combo-grid">${cards}</div>
     </div>`;
+}
+
+// Combinés spéciaux (choisis à la main par le fondateur, voir routes/combos.js
+// createManualCombo options.special) — section dédiée, réservée Premium/VIP. Le backend
+// renvoie soit data.special (contenu complet, plan éligible), soit data.specialLocked (il en
+// existe aujourd'hui mais le plan actuel n'y a pas accès) : dans ce cas on affiche juste une
+// accroche vers la page tarifs plutôt que de cacher totalement la section.
+function buildSpecialSection(data) {
+  if (data.special) {
+    return buildComboGroup({ sport: data.special.sport, sportKey: 'special', combos: data.special.combos }, 'combo-special-group');
+  }
+  if (data.specialLocked) {
+    return `
+      <div class="combo-sport-group combo-special-group combo-locked">
+        <h2 class="section-title">🌟 Spécial</h2>
+        <p style="color:var(--muted);font-size:0.85rem;padding:0.25rem 0 1rem">
+          🔒 Un ou plusieurs combinés spéciaux sont disponibles aujourd'hui, réservés aux abonnés
+          Premium/VIP — <a href="/pricing.html">passe Premium/VIP</a> pour les débloquer.
+        </p>
+      </div>`;
+  }
+  return '';
 }
 
 function comboMatchEndpoint(sportKey, id) {

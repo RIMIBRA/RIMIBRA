@@ -182,7 +182,8 @@ function renderTrafficSection({ daily, topPages, clicksByPartner }) {
 // matchs). Les candidats sont chargés à la demande (bouton) et non au chargement du
 // dashboard : l'analyse complète d'une journée peut prendre plus d'une minute à froid.
 const COMBO_MAX_MATCHES = 5;
-let comboSelection = []; // [{ sport, fixtureId, prob, label }]
+let comboSelection = []; // [{ sport, fixtureId, betType, prob, label, pickLabel }]
+let currentComboCandidates = []; // candidats du dernier chargement (sport + date affichés), pour résoudre les marchés côté client
 
 function renderManualComboSection() {
   const sportOptions = TRACKED_SPORTS.map((s) => `<option value="${s}">${SPORT_LABEL[s]}</option>`).join('');
@@ -193,8 +194,9 @@ function renderManualComboSection() {
       <p style="font-size:0.85rem;color:var(--muted);margin-bottom:0.75rem">
         Choisis toi-même les matchs du combiné (2 à ${COMBO_MAX_MATCHES}) — la sélection est conservée quand tu
         changes de sport, donc tu peux mélanger plusieurs disciplines dans un même combiné.
-        Sans le filtre de compétitions ni la barre des 50% des combinés automatiques ;
-        le pronostic de chaque match reste celui de l'algorithme.
+        Pour chaque match, choisis aussi le marché ciblé (1/X/2, BTTS, total de buts — ce dernier
+        uniquement disponible pour le foot). Sans le filtre de compétitions ni la barre des 50%
+        des combinés automatiques.
       </p>
       <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;flex-wrap:wrap">
         <select id="combo-sport" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0.35rem 0.6rem">
@@ -204,8 +206,46 @@ function renderManualComboSection() {
         <button id="combo-load-btn" class="filter-btn">Charger les matchs</button>
       </div>
       <div id="combo-candidates"></div>
+      <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0.75rem;font-size:0.85rem;cursor:pointer">
+        <input type="checkbox" id="combo-special-cb">
+        🌟 Marquer comme combiné spécial (section dédiée « Spécial », réservée aux abonnés Premium/VIP)
+      </label>
       <div id="combo-summary" style="margin-top:0.75rem"></div>
     </section>`;
+}
+
+// Mêmes marchés que resolveBetSelection côté serveur (routes/combos.js) — juste pour prévisualiser
+// le pick et la probabilité dans le dashboard ; la valeur qui compte reste recalculée côté serveur
+// à la création du combiné.
+function resolveBetPreview(candidate, betType) {
+  const probs = candidate.probabilities || {};
+  const g = candidate.goalPrediction;
+  if (betType === '1') return { pick: '1 (Domicile)', prob: probs.home };
+  if (betType === 'X') return { pick: 'X (Nul)', prob: probs.draw ?? 0 };
+  if (betType === '2') return { pick: '2 (Extérieur)', prob: probs.away };
+  if (betType === 'btts_yes') return g ? { pick: 'BTTS Oui', prob: g.btts } : null;
+  if (betType === 'btts_no') return g ? { pick: 'BTTS Non', prob: 100 - g.btts } : null;
+  if (betType === 'over25') return g ? { pick: '+2,5 buts', prob: g.over25 } : null;
+  if (betType === 'under25') return g ? { pick: '-2,5 buts', prob: 100 - g.over25 } : null;
+  return { pick: candidate.pick, prob: candidate.probability };
+}
+
+function buildBetTypeOptions(c, selected) {
+  const opts = [
+    { v: 'algo', label: `Pronostic algo — ${c.pick} (${c.probability}%)` },
+    { v: '1', label: `1 · Victoire ${c.home} (${c.probabilities?.home ?? '?'}%)` },
+    { v: 'X', label: `X · Match nul (${c.probabilities?.draw ?? 0}%)` },
+    { v: '2', label: `2 · Victoire ${c.away} (${c.probabilities?.away ?? '?'}%)` },
+  ];
+  if (c.goalPrediction) {
+    opts.push(
+      { v: 'btts_yes', label: `BTTS · Oui (${c.goalPrediction.btts}%)` },
+      { v: 'btts_no', label: `BTTS · Non (${100 - c.goalPrediction.btts}%)` },
+      { v: 'over25', label: `Total buts · +2,5 (${c.goalPrediction.over25}%)` },
+      { v: 'under25', label: `Total buts · -2,5 (${100 - c.goalPrediction.over25}%)` },
+    );
+  }
+  return opts.map((o) => `<option value="${o.v}" ${o.v === selected ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
 }
 
 function updateComboSummary() {
@@ -217,7 +257,7 @@ function updateComboSummary() {
   }
   const combined = Math.round(comboSelection.reduce((acc, s) => acc * (s.prob / 100), 1) * 100);
   const chips = comboSelection.map((s) =>
-    `<span style="background:var(--card);border:1px solid var(--border);border-radius:6px;padding:0.2rem 0.5rem;font-size:0.8rem">${SPORT_LABEL[s.sport] || s.sport} · ${escapeHtml(s.label)} (${s.prob}%)</span>`
+    `<span style="background:var(--card);border:1px solid var(--border);border-radius:6px;padding:0.2rem 0.5rem;font-size:0.8rem">${SPORT_LABEL[s.sport] || s.sport} · ${escapeHtml(s.label)} — ${escapeHtml(s.pickLabel)} (${s.prob}%)</span>`
   ).join(' ');
   const createBtn = comboSelection.length >= 2
     ? `<button id="combo-create-btn" class="filter-btn active">Créer le combiné (${comboSelection.length} matchs)</button>`
@@ -243,11 +283,27 @@ function toggleComboCandidate(cb, sport) {
       return;
     }
     if (!comboSelection.some((s) => `${s.sport}:${s.fixtureId}` === key)) {
-      comboSelection.push({ sport, fixtureId: cb.dataset.fixtureId, prob: Number(cb.dataset.prob), label: cb.dataset.label });
+      const candidate = currentComboCandidates.find((c) => String(c.fixtureId) === cb.dataset.fixtureId);
+      const select = document.querySelector(`.combo-bettype-select[data-fixture-id="${cb.dataset.fixtureId}"]`);
+      const betType = select ? select.value : 'algo';
+      const preview = resolveBetPreview(candidate, betType) || { pick: candidate.pick, prob: candidate.probability };
+      comboSelection.push({
+        sport, fixtureId: cb.dataset.fixtureId, betType,
+        prob: preview.prob, pickLabel: preview.pick, label: `${candidate.home} — ${candidate.away}`,
+      });
     }
   } else {
     comboSelection = comboSelection.filter((s) => `${s.sport}:${s.fixtureId}` !== key);
   }
+  updateComboSummary();
+}
+
+function updateComboSelectionBetType(sport, fixtureId, betType) {
+  const idx = comboSelection.findIndex((s) => s.sport === sport && s.fixtureId === fixtureId);
+  if (idx === -1) return; // pas encore coché, rien à mettre à jour tout de suite
+  const candidate = currentComboCandidates.find((c) => String(c.fixtureId) === fixtureId);
+  const preview = resolveBetPreview(candidate, betType) || { pick: candidate.pick, prob: candidate.probability };
+  comboSelection[idx] = { ...comboSelection[idx], betType, prob: preview.prob, pickLabel: preview.pick };
   updateComboSummary();
 }
 
@@ -265,19 +321,20 @@ async function loadComboCandidates() {
       updateComboSummary();
       return;
     }
+    currentComboCandidates = data.candidates;
     container.innerHTML = `
       <table class="admin-table">
-        <thead><tr><th></th><th>Ligue</th><th>Match</th><th>Pronostic</th><th>Probabilité</th></tr></thead>
+        <thead><tr><th></th><th>Ligue</th><th>Match</th><th>Marché (pronostic)</th></tr></thead>
         <tbody>
           ${data.candidates.map((c) => {
-            const selected = comboSelection.some((s) => s.sport === sport && String(s.fixtureId) === String(c.fixtureId));
+            const existing = comboSelection.find((s) => s.sport === sport && String(s.fixtureId) === String(c.fixtureId));
+            const betType = existing?.betType || 'algo';
             return `
             <tr class="combo-candidate-row" style="cursor:pointer" data-fixture-id="${c.fixtureId}" title="Cliquer pour voir le détail du match">
-              <td><input type="checkbox" class="combo-candidate-cb" ${selected ? 'checked' : ''} data-fixture-id="${c.fixtureId}" data-prob="${c.probability}" data-label="${escapeHtml(c.home)} — ${escapeHtml(c.away)}"></td>
+              <td><input type="checkbox" class="combo-candidate-cb" ${existing ? 'checked' : ''} data-fixture-id="${c.fixtureId}"></td>
               <td>${escapeHtml(c.league || '')}</td>
               <td>${escapeHtml(c.home)} — ${escapeHtml(c.away)}</td>
-              <td>${escapeHtml(c.pick)}</td>
-              <td>${c.probability}%</td>
+              <td><select class="combo-bettype-select" data-fixture-id="${c.fixtureId}" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0.25rem 0.4rem">${buildBetTypeOptions(c, betType)}</select></td>
             </tr>`;
           }).join('')}
         </tbody>
@@ -285,6 +342,10 @@ async function loadComboCandidates() {
     document.querySelectorAll('.combo-candidate-cb').forEach((cb) => {
       cb.addEventListener('click', (e) => e.stopPropagation()); // ne pas ouvrir la modale en cochant
       cb.addEventListener('change', () => toggleComboCandidate(cb, sport));
+    });
+    document.querySelectorAll('.combo-bettype-select').forEach((sel) => {
+      sel.addEventListener('click', (e) => e.stopPropagation());
+      sel.addEventListener('change', () => updateComboSelectionBetType(sport, sel.dataset.fixtureId, sel.value));
     });
     document.querySelectorAll('.combo-candidate-row').forEach((row) => {
       row.addEventListener('click', () => openTrackedMatchModal(sport, row.dataset.fixtureId));
@@ -297,6 +358,7 @@ async function loadComboCandidates() {
 
 async function createManualComboFromSelection() {
   const date = document.getElementById('combo-date').value;
+  const special = document.getElementById('combo-special-cb')?.checked || false;
   const resultEl = document.getElementById('combo-create-result');
   const btn = document.getElementById('combo-create-btn');
   btn.disabled = true;
@@ -305,15 +367,22 @@ async function createManualComboFromSelection() {
     const res = await fetch('/api/admin/combos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...authHeaders() },
-      body: JSON.stringify({ date, fixtures: comboSelection.map(({ sport, fixtureId }) => ({ sport, fixtureId })) }),
+      body: JSON.stringify({
+        date,
+        special,
+        fixtures: comboSelection.map(({ sport, fixtureId, betType }) => ({ sport, fixtureId, betType })),
+      }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Création impossible');
     comboSelection = [];
     document.querySelectorAll('.combo-candidate-cb').forEach((cb) => { cb.checked = false; });
+    const specialCb = document.getElementById('combo-special-cb');
+    if (specialCb) specialCb.checked = false;
+    const kind = data.sport === 'special' ? 'spécial ' : data.sport === 'multi' ? 'multi-sports ' : '';
     // Pas via updateComboSummary() : la sélection vidée effacerait le message de succès
     document.getElementById('combo-summary').innerHTML =
-      `<span style="color:var(--green)">✅ Combiné ${data.sport === 'multi' ? 'multi-sports ' : ''}créé (${data.combinedProbability}%, risque ${data.risk}) — visible dans l'onglet Combinés</span>`;
+      `<span style="color:var(--green)">✅ Combiné ${kind}créé (${data.combinedProbability}%, risque ${data.risk}) — visible dans l'onglet Combinés${data.sport === 'special' ? ' (section Spécial)' : ''}</span>`;
   } catch (err) {
     btn.disabled = false;
     resultEl.innerHTML = `<span style="color:var(--red)">Erreur : ${escapeHtml(err.message)}</span>`;
