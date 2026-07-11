@@ -37,6 +37,70 @@ function escapeHtml(str) {
   }[c]));
 }
 
+// Notifications push (combinés spéciaux créés/résolus) — réservées Premium/VIP, voir
+// routes/push.js. applicationServerKey attend un Uint8Array, pas la chaîne base64url brute
+// renvoyée par le serveur -> conversion standard pour l'API Push.
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+  return outputArray;
+}
+
+function pushSupported() {
+  return 'serviceWorker' in navigator && 'PushManager' in window;
+}
+
+async function getExistingPushSubscription() {
+  if (!pushSupported()) return null;
+  const reg = await navigator.serviceWorker.getRegistration('/sw.js').catch(() => null);
+  if (!reg) return null;
+  return reg.pushManager.getSubscription();
+}
+
+async function enablePushNotifications() {
+  try {
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return;
+
+    const keyRes = await fetch('/api/push/vapid-public-key');
+    const keyData = await keyRes.json();
+    if (!keyRes.ok) throw new Error(keyData.error || 'Notifications indisponibles pour le moment');
+
+    const subscription = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(keyData.publicKey),
+    });
+
+    const res = await fetch('/api/push/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
+      body: JSON.stringify({ subscription: subscription.toJSON() }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || "Échec de l'enregistrement de l'abonnement");
+    renderAccountStatus();
+  } catch (err) {
+    alert("Impossible d'activer les notifications : " + err.message);
+  }
+}
+
+async function disablePushNotifications() {
+  const sub = await getExistingPushSubscription();
+  if (sub) {
+    await fetch('/api/push/unsubscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ endpoint: sub.endpoint }),
+    }).catch(() => {});
+    await sub.unsubscribe().catch(() => {});
+  }
+  renderAccountStatus();
+}
+
 async function renderAccountStatus() {
   const user = await fetchCurrentUser();
   if (!user) {
@@ -58,11 +122,28 @@ async function renderAccountStatus() {
   const dashboardLink = user.isAdmin ? '<a href="/admin.html" id="dashboard-link">🛠️ Dashboard</a>' : '';
   // Pas de proposition d'upgrade pour un admin ou un VIP (déjà au niveau maximum d'accès)
   const upgradeLink = !user.isAdmin && user.plan !== 'vip' ? '<a href="/pricing.html">⭐ Passer Premium/VIP</a>' : '';
-  accountStatus.innerHTML = `<span class="plan-${user.isAdmin ? 'admin' : user.plan}">${escapeHtml(user.email)} · ${planLabel}</span> ${upgradeLink} ${dashboardLink} <a href="#" id="logout-link">Déconnexion</a>`;
+
+  // Notifications push (combinés spéciaux) : proposées uniquement aux abonnés Premium/VIP,
+  // et seulement si le navigateur les supporte (Safari iOS < 16.4, par ex., ne les a pas).
+  let pushLinkHtml = '';
+  if (isPayingPlan && pushSupported()) {
+    const existingSub = await getExistingPushSubscription();
+    pushLinkHtml = existingSub
+      ? '<a href="#" id="push-toggle-link">🔔 Notifications activées</a>'
+      : '<a href="#" id="push-toggle-link">🔕 Activer les notifications</a>';
+  }
+
+  accountStatus.innerHTML = `<span class="plan-${user.isAdmin ? 'admin' : user.plan}">${escapeHtml(user.email)} · ${planLabel}</span> ${upgradeLink} ${pushLinkHtml} ${dashboardLink} <a href="#" id="logout-link">Déconnexion</a>`;
   document.getElementById('logout-link').addEventListener('click', (e) => {
     e.preventDefault();
     clearToken();
     window.location.reload();
+  });
+  document.getElementById('push-toggle-link')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    const sub = await getExistingPushSubscription();
+    if (sub) await disablePushNotifications();
+    else await enablePushNotifications();
   });
 }
 

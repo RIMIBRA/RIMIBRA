@@ -1,8 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const { canAccessSport, comboLimitFor, hasAccess } = require('../auth/tiers');
-const { getCombosForSport, saveCombo } = require('../db/combos');
+const { getCombosForSport, saveCombo, markComboNotified } = require('../db/combos');
 const { mapWithConcurrency } = require('../utils/concurrency');
+const { notifyPremiumUsers } = require('../push/webPush');
 
 const football = require('../algorithm/predictor');
 const nfl = require('../algorithm/nflPredictor');
@@ -359,6 +360,17 @@ async function createManualCombo(date, selections, options = {}) {
   const comboLabel = special ? SPECIAL_LABEL : (singleSport ? singleSport.label : MULTI_LABEL);
 
   await saveCombo(date, comboSport, comboLabel, matches, combinedProbability, risk);
+
+  // Notifie les abonnés Premium/VIP dès la création d'un combiné Spécial — jamais bloquant
+  // pour la réponse admin (pas d'await), les échecs individuels sont gérés dans webPush.js.
+  if (special) {
+    notifyPremiumUsers({
+      title: '🌟 Nouveau combiné spécial',
+      body: `${matches.length} matchs · ${combinedProbability}% de probabilité combinée`,
+      url: '/?sport=combos',
+    }).catch((err) => console.error('Notification push (combiné spécial créé) ignorée:', err.message));
+  }
+
   return { sport: comboSport, matches, combinedProbability, risk };
 }
 
@@ -675,10 +687,48 @@ function scheduleDailyPrewarm() {
   }, msUntilNext3am());
 }
 
+// Vérifie si des combinés Spéciaux non encore notifiés sont désormais résolus (gagné/perdu),
+// et notifie les abonnés Premium/VIP une seule fois par combiné (colonne resolution_notified)
+// — indépendant de tout visiteur, comme resolveRecentResults() pour les pronostics simples
+// (voir server.js) : sinon un combiné résolu une nuit calme ne notifierait jamais personne.
+async function checkSpecialComboResolutions(date) {
+  const stored = await getCombosForSport(date, 'special');
+  for (const row of stored) {
+    if (row.resolution_notified) continue;
+    const matches = await Promise.all(row.matches.map((m) => enrichMatchStatus(null, m)));
+    const { status } = summarize(matches);
+    if (status === 'active') continue;
+
+    await markComboNotified(row.id);
+    const outcome = status === 'won' ? '🏆 gagné' : '❌ perdu';
+    notifyPremiumUsers({
+      title: `Combiné spécial ${outcome}`,
+      body: `${row.matches.length} matchs · ${row.combined_probability}% — résultat disponible`,
+      url: '/?sport=combos',
+    }).catch((err) => console.error('Notification push (résolution combiné spécial) ignorée:', err.message));
+  }
+}
+
+// Toutes les 10 min : assez réactif pour une notification, sans surcharger les API de score.
+// Vérifie aujourd'hui ET hier (un combiné lancé tard peut se résoudre après minuit).
+const SPECIAL_COMBO_CHECK_INTERVAL_MS = 10 * 60 * 1000;
+
+function scheduleSpecialComboResolutionChecks() {
+  const runCheck = () => {
+    const today = new Date().toISOString().split('T')[0];
+    const yesterday = addDays(today, -1);
+    checkSpecialComboResolutions(today).catch((err) => console.error('Vérification résolution combinés spéciaux (ignorée):', err.message));
+    checkSpecialComboResolutions(yesterday).catch((err) => console.error('Vérification résolution combinés spéciaux (ignorée):', err.message));
+  };
+  runCheck(); // rattrape ce qui s'est résolu pendant que le serveur était éteint
+  setInterval(runCheck, SPECIAL_COMBO_CHECK_INTERVAL_MS);
+}
+
 // Jest met NODE_ENV=test automatiquement — on évite d'armer un setInterval qui ne se
 // termine jamais et empêche le process de test de quitter proprement.
 if (process.env.NODE_ENV !== 'test') {
   scheduleDailyPrewarm();
+  scheduleSpecialComboResolutionChecks();
 }
 
 module.exports = router;

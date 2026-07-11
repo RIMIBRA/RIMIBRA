@@ -58,6 +58,7 @@ app.use('/api/baseball/predictions', requireSportAccess('baseball'), require('./
 app.use('/api/handball/predictions', requireSportAccess('handball'), require('./routes/handballPredictions'));
 app.use('/api/tennis/predictions', requireSportAccess('tennis'), require('./routes/tennisPredictions'));
 app.use('/api/combos', require('./routes/combos'));
+app.use('/api/push', require('./routes/push'));
 
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
