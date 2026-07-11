@@ -331,7 +331,12 @@ async function createManualCombo(date, selections, options = {}) {
     }
     if (!p) throw new Error(`Match ${fixtureId} introuvable dans l'analyse ${key} du ${date}`);
     if (p.error || !p.probabilities || p.matchState === 'finished') {
-      throw new Error(`Match ${fixtureId} inutilisable (terminé ou sans probabilités exploitables)`);
+      // Nom des équipes plutôt que l'id brut — sans ça, impossible de savoir lequel des
+      // matchs sélectionnés retirer quand un combiné de plusieurs matchs est refusé (ex. un
+      // match a eu le temps de se terminer pendant la construction du combiné).
+      const label = p.fixture?.home && p.fixture?.away ? `${p.fixture.home} — ${p.fixture.away}` : `Match ${fixtureId}`;
+      const reason = p.matchState === 'finished' ? 'est déjà terminé' : "n'a pas de probabilités exploitables";
+      throw new Error(`${label} ${reason} — retire-le du combiné et réessaie`);
     }
     const { pick, probability } = await resolveBetSelection(p, betType);
     return {
