@@ -3,7 +3,7 @@ const router = express.Router();
 const { canAccessSport, comboLimitFor, hasAccess } = require('../auth/tiers');
 const { getCombosForSport, saveCombo, markComboNotified } = require('../db/combos');
 const { mapWithConcurrency } = require('../utils/concurrency');
-const { notifyPremiumUsers } = require('../push/webPush');
+const { broadcastPush } = require('../push/webPush');
 
 const football = require('../algorithm/predictor');
 const nfl = require('../algorithm/nflPredictor');
@@ -361,14 +361,16 @@ async function createManualCombo(date, selections, options = {}) {
 
   await saveCombo(date, comboSport, comboLabel, matches, combinedProbability, risk);
 
-  // Notifie les abonnés Premium/VIP dès la création d'un combiné Spécial — jamais bloquant
-  // pour la réponse admin (pas d'await), les échecs individuels sont gérés dans webPush.js.
+  // Notifie TOUS les abonnés dès la création d'un combiné Spécial (gratuit compris — créer
+  // l'envie) — jamais bloquant pour la réponse admin (pas d'await), échecs individuels gérés
+  // dans webPush.js. Combiné encore actif -> pas encore visible en gratuit (voir /today plus
+  // bas), donc le clic renvoie vers la page tarifs plutôt que vers un contenu verrouillé.
   if (special) {
-    notifyPremiumUsers({
+    broadcastPush((sub) => ({
       title: '🌟 Nouveau combiné spécial',
       body: `${matches.length} matchs · ${combinedProbability}% de probabilité combinée`,
-      url: '/?sport=combos',
-    }).catch((err) => console.error('Notification push (combiné spécial créé) ignorée:', err.message));
+      url: (sub.isAdmin || hasAccess(sub.plan, 'premium')) ? '/?sport=combos' : '/pricing.html',
+    })).catch((err) => console.error('Notification push (combiné spécial créé) ignorée:', err.message));
   }
 
   return { sport: comboSport, matches, combinedProbability, risk };
@@ -629,10 +631,12 @@ router.get('/today', async (req, res) => {
 
     const limitedGroups = limit === Infinity ? groups : groups.slice(0, limit);
 
-    // Combinés spéciaux (voir createManualCombo options.special) : section à part, réservée
-    // Premium/VIP comme les filtres Top 3/Top 2 (voir tiers.js hasAccess) — indépendante de
-    // comboLimitFor, qui ne concerne que le nombre de groupes par sport. specialLocked signale
-    // au client qu'il en existe aujourd'hui sans les révéler, pour l'inciter à passer Premium/VIP.
+    // Combinés spéciaux (voir createManualCombo options.special) : section à part, indépendante
+    // de comboLimitFor (qui ne concerne que le nombre de groupes par sport). Premium/VIP voit
+    // tout. Gratuit : un combiné encore actif reste verrouillé (urgence de payer POUR le voir
+    // avant sa résolution) mais un combiné déjà résolu (gagné/perdu) devient visible — vitrine
+    // de la qualité des pronostics, incite à l'abonnement sans frustrer un clic depuis la
+    // notification push (voir push/webPush.js) une fois le combiné terminé.
     let special = null;
     let specialLocked = false;
     try {
@@ -641,7 +645,11 @@ router.get('/today', async (req, res) => {
         if (isAdmin || hasAccess(plan, 'premium')) {
           special = { sport: SPECIAL_LABEL, sportKey: 'special', combos: specialSeries };
         } else {
-          specialLocked = true;
+          const resolved = specialSeries.filter((c) => c.status !== 'active');
+          if (resolved.length > 0) {
+            special = { sport: SPECIAL_LABEL, sportKey: 'special', combos: resolved };
+          }
+          specialLocked = specialSeries.some((c) => c.status === 'active');
         }
       }
     } catch {
@@ -701,11 +709,13 @@ async function checkSpecialComboResolutions(date) {
 
     await markComboNotified(row.id);
     const outcome = status === 'won' ? '🏆 gagné' : '❌ perdu';
-    notifyPremiumUsers({
+    // Résolu -> visible en gratuit aussi (voir /today plus haut), donc même URL pour tout le
+    // monde : pas besoin de builder par abonné ici, contrairement à la notif de création.
+    broadcastPush(() => ({
       title: `Combiné spécial ${outcome}`,
       body: `${row.matches.length} matchs · ${row.combined_probability}% — résultat disponible`,
       url: '/?sport=combos',
-    }).catch((err) => console.error('Notification push (résolution combiné spécial) ignorée:', err.message));
+    })).catch((err) => console.error('Notification push (résolution combiné spécial) ignorée:', err.message));
   }
 }
 

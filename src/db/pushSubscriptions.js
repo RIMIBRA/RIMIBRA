@@ -13,20 +13,22 @@ async function removeSubscription(endpoint) {
   await pool.query('DELETE FROM push_subscriptions WHERE endpoint = $1', [endpoint]);
 }
 
-// Abonnements push des utilisateurs Premium/VIP actifs (+ admins, pour tester) — même filtre
-// de plan que le reste de l'app (voir auth/tiers.js), en un seul aller-retour.
-async function getPremiumSubscriptions() {
+// Tous les abonnements push, gratuit compris (voir push/webPush.js broadcastPush — tout le
+// monde est notifié pour créer l'envie, seul le contenu accessible au clic diffère selon le
+// plan) — plan + isAdmin renvoyés pour que l'appelant adapte l'URL de la notif par abonné,
+// même requête que listUsersWithPlan() (db/users.js).
+async function getAllSubscriptions() {
   const { rows } = await pool.query(`
-    SELECT ps.endpoint, ps.p256dh, ps.auth
+    SELECT ps.endpoint, ps.p256dh, ps.auth, u.is_admin AS "isAdmin",
+      COALESCE((
+        SELECT plan FROM subscriptions s
+        WHERE s.user_id = u.id AND s.status = 'active' AND (s.expires_at IS NULL OR s.expires_at > now())
+        ORDER BY s.started_at DESC LIMIT 1
+      ), 'free') AS plan
     FROM push_subscriptions ps
     JOIN users u ON u.id = ps.user_id
-    WHERE u.is_admin = true OR EXISTS (
-      SELECT 1 FROM subscriptions s
-      WHERE s.user_id = u.id AND s.status = 'active' AND (s.expires_at IS NULL OR s.expires_at > now())
-        AND s.plan IN ('premium', 'vip')
-    )
   `);
   return rows;
 }
 
-module.exports = { saveSubscription, removeSubscription, getPremiumSubscriptions };
+module.exports = { saveSubscription, removeSubscription, getAllSubscriptions };

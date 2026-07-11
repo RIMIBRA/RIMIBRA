@@ -1,5 +1,5 @@
 const webpush = require('web-push');
-const { getPremiumSubscriptions, removeSubscription } = require('../db/pushSubscriptions');
+const { getAllSubscriptions, removeSubscription } = require('../db/pushSubscriptions');
 
 // Absentes en dev local tant que le .env n'est pas rempli -> mode no-op silencieux plutôt
 // qu'un crash au démarrage (web-push exige des clés valides pour setVapidDetails).
@@ -29,12 +29,15 @@ async function sendToSubscription(sub, payload) {
   }
 }
 
-// Diffuse une notification à tous les abonnés Premium/VIP — jamais bloquant pour l'appelant
+// Diffuse une notification à TOUS les abonnés, gratuit compris (créer l'envie plutôt que de
+// notifier seulement ceux qui peuvent déjà tout voir) — buildPayload(sub) reçoit
+// { plan, isAdmin } par abonné pour adapter le contenu (typiquement l'url : vers le combiné si
+// déjà accessible, vers la page tarifs sinon). Jamais bloquant pour l'appelant
 // (création/résolution de combiné) : à appeler avec .catch(), pas await, depuis le code métier.
-async function notifyPremiumUsers(payload) {
+async function broadcastPush(buildPayload) {
   if (!configured) return;
-  const subs = await getPremiumSubscriptions();
-  await Promise.all(subs.map((sub) => sendToSubscription(sub, payload)));
+  const subs = await getAllSubscriptions();
+  await Promise.all(subs.map((sub) => sendToSubscription(sub, buildPayload(sub))));
 }
 
-module.exports = { notifyPremiumUsers, configured };
+module.exports = { broadcastPush, configured };
