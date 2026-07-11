@@ -205,6 +205,7 @@ function renderManualComboSection() {
         <input type="date" id="combo-date" value="${today}" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0.35rem 0.6rem">
         <button id="combo-load-btn" class="filter-btn">Charger les matchs</button>
       </div>
+      <input type="text" id="combo-team-search" placeholder="🔎 Rechercher une équipe ou un joueur…" style="width:100%;max-width:320px;margin-bottom:0.6rem;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0.35rem 0.6rem">
       <div id="combo-candidates"></div>
       <label style="display:flex;align-items:center;gap:0.4rem;margin-top:0.75rem;font-size:0.85rem;cursor:pointer">
         <input type="checkbox" id="combo-special-cb">
@@ -322,10 +323,65 @@ function updateComboSelectionBetType(sport, fixtureId, betType) {
   updateComboSummary();
 }
 
+// Insensible à la casse et aux accents ("real" doit trouver "Real Madrid", "leon" doit trouver
+// "León") — tous les candidats du jour sont déjà chargés en mémoire (currentComboCandidates),
+// donc la recherche filtre côté client plutôt que de retaper l'API à chaque frappe.
+function normalizeSearchText(str) {
+  return String(str || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+
+function renderComboCandidatesTable(list, sport) {
+  const container = document.getElementById('combo-candidates');
+  if (!list.length) {
+    container.innerHTML = '<p style="color:var(--muted)">Aucun match ne correspond à cette recherche.</p>';
+    return;
+  }
+  container.innerHTML = `
+    <table class="admin-table">
+      <thead><tr><th></th><th>Ligue</th><th>Match</th><th>Marché (pronostic)</th></tr></thead>
+      <tbody>
+        ${list.map((c) => {
+          const existing = comboSelection.find((s) => s.sport === sport && String(s.fixtureId) === String(c.fixtureId));
+          const betType = existing?.betType || 'algo';
+          return `
+          <tr class="combo-candidate-row" style="cursor:pointer" data-fixture-id="${c.fixtureId}" title="Cliquer pour voir le détail du match">
+            <td><input type="checkbox" class="combo-candidate-cb" ${existing ? 'checked' : ''} data-fixture-id="${c.fixtureId}"></td>
+            <td>${escapeHtml(c.league || '')}</td>
+            <td>${escapeHtml(c.home)} — ${escapeHtml(c.away)}</td>
+            <td><select class="combo-bettype-select" data-fixture-id="${c.fixtureId}" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0.25rem 0.4rem">${buildBetTypeOptions(c, betType)}</select></td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+  document.querySelectorAll('.combo-candidate-cb').forEach((cb) => {
+    cb.addEventListener('click', (e) => e.stopPropagation()); // ne pas ouvrir la modale en cochant
+    cb.addEventListener('change', () => toggleComboCandidate(cb, sport));
+  });
+  document.querySelectorAll('.combo-bettype-select').forEach((sel) => {
+    sel.addEventListener('click', (e) => e.stopPropagation());
+    sel.addEventListener('change', () => updateComboSelectionBetType(sport, sel.dataset.fixtureId, sel.value));
+  });
+  document.querySelectorAll('.combo-candidate-row').forEach((row) => {
+    row.addEventListener('click', () => openTrackedMatchModal(sport, row.dataset.fixtureId));
+  });
+}
+
+function filterComboCandidates() {
+  const sport = document.getElementById('combo-sport').value;
+  const query = normalizeSearchText(document.getElementById('combo-team-search')?.value);
+  const filtered = query
+    ? currentComboCandidates.filter((c) => normalizeSearchText(c.home).includes(query) || normalizeSearchText(c.away).includes(query))
+    : currentComboCandidates;
+  renderComboCandidatesTable(filtered, sport);
+  updateComboSummary();
+}
+
 async function loadComboCandidates() {
   const sport = document.getElementById('combo-sport').value;
   const date = document.getElementById('combo-date').value;
   const container = document.getElementById('combo-candidates');
+  const searchInput = document.getElementById('combo-team-search');
+  if (searchInput) searchInput.value = ''; // nouveau chargement -> on repart d'une recherche vide
   container.innerHTML = '<p style="color:var(--muted)">Analyse des matchs en cours… (peut prendre une minute sur un cache froid)</p>';
   try {
     const res = await fetch(`/api/admin/combo-candidates?sport=${sport}&date=${date}`, { headers: authHeaders() });
@@ -337,34 +393,7 @@ async function loadComboCandidates() {
       return;
     }
     currentComboCandidates = data.candidates;
-    container.innerHTML = `
-      <table class="admin-table">
-        <thead><tr><th></th><th>Ligue</th><th>Match</th><th>Marché (pronostic)</th></tr></thead>
-        <tbody>
-          ${data.candidates.map((c) => {
-            const existing = comboSelection.find((s) => s.sport === sport && String(s.fixtureId) === String(c.fixtureId));
-            const betType = existing?.betType || 'algo';
-            return `
-            <tr class="combo-candidate-row" style="cursor:pointer" data-fixture-id="${c.fixtureId}" title="Cliquer pour voir le détail du match">
-              <td><input type="checkbox" class="combo-candidate-cb" ${existing ? 'checked' : ''} data-fixture-id="${c.fixtureId}"></td>
-              <td>${escapeHtml(c.league || '')}</td>
-              <td>${escapeHtml(c.home)} — ${escapeHtml(c.away)}</td>
-              <td><select class="combo-bettype-select" data-fixture-id="${c.fixtureId}" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0.25rem 0.4rem">${buildBetTypeOptions(c, betType)}</select></td>
-            </tr>`;
-          }).join('')}
-        </tbody>
-      </table>`;
-    document.querySelectorAll('.combo-candidate-cb').forEach((cb) => {
-      cb.addEventListener('click', (e) => e.stopPropagation()); // ne pas ouvrir la modale en cochant
-      cb.addEventListener('change', () => toggleComboCandidate(cb, sport));
-    });
-    document.querySelectorAll('.combo-bettype-select').forEach((sel) => {
-      sel.addEventListener('click', (e) => e.stopPropagation());
-      sel.addEventListener('change', () => updateComboSelectionBetType(sport, sel.dataset.fixtureId, sel.value));
-    });
-    document.querySelectorAll('.combo-candidate-row').forEach((row) => {
-      row.addEventListener('click', () => openTrackedMatchModal(sport, row.dataset.fixtureId));
-    });
+    renderComboCandidatesTable(currentComboCandidates, sport);
     updateComboSummary();
   } catch (err) {
     container.innerHTML = `<p style="color:var(--red)">Erreur : ${escapeHtml(err.message)}</p>`;
@@ -502,6 +531,7 @@ async function loadDashboard(extraOnly = true, sport = 'football') {
     row.addEventListener('click', () => openTrackedMatchModal(row.dataset.sport, row.dataset.fixtureId));
   });
   document.getElementById('combo-load-btn')?.addEventListener('click', loadComboCandidates);
+  document.getElementById('combo-team-search')?.addEventListener('input', filterComboCandidates);
 }
 
 loadDashboard();
