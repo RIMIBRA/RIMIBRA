@@ -20,4 +20,11 @@ async function saveCombo(date, sport, sportLabel, matches, combinedProbability, 
   return rows[0];
 }
 
-module.exports = { getCombosForSport, saveCombo };
+// Marque un combiné comme déjà notifié aux abonnés Premium/VIP une fois résolu (voir
+// routes/combos.js checkSpecialComboResolutions) — évite de renvoyer la même notification
+// push à chaque vérification périodique.
+async function markComboNotified(id) {
+  await pool.query('UPDATE combos SET resolution_notified = true WHERE id = $1', [id]);
+}
+
+module.exports = { getCombosForSport, saveCombo, markComboNotified };
