@@ -368,12 +368,57 @@ function renderComboCandidatesTable(list, sport) {
 
 function filterComboCandidates() {
   const sport = document.getElementById('combo-sport').value;
-  const query = normalizeSearchText(document.getElementById('combo-team-search')?.value);
+  const rawQuery = (document.getElementById('combo-team-search')?.value || '').trim();
+  const query = normalizeSearchText(rawQuery);
   const filtered = query
     ? currentComboCandidates.filter((c) => normalizeSearchText(c.home).includes(query) || normalizeSearchText(c.away).includes(query))
     : currentComboCandidates;
+
+  if (query && filtered.length === 0) {
+    // Absent des ~30 matchs/jour déjà chargés (plafond côté serveur, voir MAX_FIXTURES_PER_DAY)
+    // ne veut pas dire absent du jour -> proposer la recherche à la demande (même mécanisme que
+    // la recherche publique de l'app) plutôt que de laisser croire que le match n'existe pas.
+    const container = document.getElementById('combo-candidates');
+    container.innerHTML = `
+      <p style="color:var(--muted)">Aucun match avec « ${escapeHtml(rawQuery)} » parmi les ${currentComboCandidates.length} déjà chargés.</p>
+      <button id="combo-search-remote-btn" class="filter-btn">🔍 Chercher « ${escapeHtml(rawQuery)} » hors de la sélection automatique</button>`;
+    document.getElementById('combo-search-remote-btn').addEventListener('click', searchComboCandidatesRemote);
+    updateComboSummary();
+    return;
+  }
+
   renderComboCandidatesTable(filtered, sport);
   updateComboSummary();
+}
+
+// Analyse à la demande d'un match précis, au-delà de la sélection automatique du jour (limitée
+// par sport, ex. 30 matchs/jour pour le foot — voir predictor.js MAX_FIXTURES_PER_DAY) : réutilise
+// le même mécanisme que la recherche publique (searchFixtures/searchGames côté serveur).
+async function searchComboCandidatesRemote() {
+  const sport = document.getElementById('combo-sport').value;
+  const date = document.getElementById('combo-date').value;
+  const rawQuery = (document.getElementById('combo-team-search')?.value || '').trim();
+  if (!rawQuery) return;
+  const container = document.getElementById('combo-candidates');
+  container.innerHTML = '<p style="color:var(--muted)">Recherche en cours… (analyse à la demande, hors sélection automatique)</p>';
+  try {
+    const res = await fetch(`/api/admin/combo-candidates?sport=${sport}&date=${date}&q=${encodeURIComponent(rawQuery)}`, { headers: authHeaders() });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Recherche impossible');
+    if (!data.candidates.length) {
+      container.innerHTML = `<p style="color:var(--muted)">Toujours aucun match trouvé pour « ${escapeHtml(rawQuery)} » ce jour-là.</p>`;
+      updateComboSummary();
+      return;
+    }
+    // Rejoint la liste déjà chargée (sans doublon), pour rester disponible si la recherche
+    // est effacée ou changée ensuite sans perdre ce qui vient d'être trouvé.
+    const known = new Set(currentComboCandidates.map((c) => String(c.fixtureId)));
+    data.candidates.forEach((c) => { if (!known.has(String(c.fixtureId))) currentComboCandidates.push(c); });
+    renderComboCandidatesTable(data.candidates, sport);
+    updateComboSummary();
+  } catch (err) {
+    container.innerHTML = `<p style="color:var(--red)">Erreur : ${escapeHtml(err.message)}</p>`;
+  }
 }
 
 async function loadComboCandidates() {
