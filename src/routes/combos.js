@@ -20,14 +20,26 @@ const baseballApi = require('../api/baseballClient');
 const handballApi = require('../api/handballClient');
 const tennisApi = require('../api/tennisClient');
 
+// Analyse un match précis par id, sans passer par la sélection automatique du jour (plafonnée,
+// voir MAX_FIXTURES_PER_DAY côté foot) — sert quand un match trouvé via la recherche à la
+// demande (listComboCandidates/searchComboCandidatesRemote) est ensuite inclus dans un combiné
+// manuel : sans ça, createManualCombo ne le retrouvait pas en rechargeant analyzeDay et
+// échouait avec "Match X introuvable", alors que ce match existe bel et bien.
+function byIdAnalyzer(byIdFn, analyzeFn) {
+  return async (id) => {
+    const raw = await byIdFn(id);
+    return raw ? analyzeFn(raw) : null;
+  };
+}
+
 const SPORTS = [
-  { key: 'football', label: '⚽ Football', analyzeDay: football.analyzeDayFixtures, search: football.searchFixtures, byId: (id) => footballApi.getFixtureById(id) },
-  { key: 'nfl', label: '🏈 NFL', analyzeDay: nfl.analyzeDayGames, search: nfl.searchGames, byId: (id) => nflApi.getGameById(id) },
-  { key: 'nba', label: '🏀 Basketball', analyzeDay: nba.analyzeDayGames, search: nba.searchGames, byId: (id) => nbaApi.getGameById(id) },
-  { key: 'hockey', label: '🏒 Hockey', analyzeDay: hockey.analyzeDayGames, search: hockey.searchGames, byId: (id) => hockeyApi.getGameById(id) },
-  { key: 'baseball', label: '⚾ Baseball', analyzeDay: baseball.analyzeDayGames, search: baseball.searchGames, byId: (id) => baseballApi.getGameById(id) },
-  { key: 'handball', label: '🤾 Handball', analyzeDay: handball.analyzeDayGames, search: handball.searchGames, byId: (id) => handballApi.getGameById(id) },
-  { key: 'tennis', label: '🎾 Tennis', analyzeDay: tennis.analyzeDayGames, search: tennis.searchGames, byId: (id) => tennisApi.getGameById(id) },
+  { key: 'football', label: '⚽ Football', analyzeDay: football.analyzeDayFixtures, search: football.searchFixtures, byId: (id) => footballApi.getFixtureById(id), analyzeById: byIdAnalyzer((id) => footballApi.getFixtureById(id), football.analyzeFixture) },
+  { key: 'nfl', label: '🏈 NFL', analyzeDay: nfl.analyzeDayGames, search: nfl.searchGames, byId: (id) => nflApi.getGameById(id), analyzeById: byIdAnalyzer((id) => nflApi.getGameById(id), nfl.analyzeGame) },
+  { key: 'nba', label: '🏀 Basketball', analyzeDay: nba.analyzeDayGames, search: nba.searchGames, byId: (id) => nbaApi.getGameById(id), analyzeById: byIdAnalyzer((id) => nbaApi.getGameById(id), nba.analyzeGame) },
+  { key: 'hockey', label: '🏒 Hockey', analyzeDay: hockey.analyzeDayGames, search: hockey.searchGames, byId: (id) => hockeyApi.getGameById(id), analyzeById: byIdAnalyzer((id) => hockeyApi.getGameById(id), hockey.analyzeGame) },
+  { key: 'baseball', label: '⚾ Baseball', analyzeDay: baseball.analyzeDayGames, search: baseball.searchGames, byId: (id) => baseballApi.getGameById(id), analyzeById: byIdAnalyzer((id) => baseballApi.getGameById(id), baseball.analyzeGame) },
+  { key: 'handball', label: '🤾 Handball', analyzeDay: handball.analyzeDayGames, search: handball.searchGames, byId: (id) => handballApi.getGameById(id), analyzeById: byIdAnalyzer((id) => handballApi.getGameById(id), handball.analyzeGame) },
+  { key: 'tennis', label: '🎾 Tennis', analyzeDay: tennis.analyzeDayGames, search: tennis.searchGames, byId: (id) => tennisApi.getGameById(id), analyzeById: byIdAnalyzer((id) => tennisApi.getGameById(id), tennis.analyzeGame) },
 ];
 
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN', 'AWD', 'WO'];
@@ -237,7 +249,14 @@ async function createManualCombo(date, selections, options = {}) {
   }
 
   const matches = await Promise.all(selections.map(async ({ sport: key, fixtureId, betType }) => {
-    const p = analyses[key].find((r) => String(r.fixture?.id) === String(fixtureId));
+    let p = analyses[key].find((r) => String(r.fixture?.id) === String(fixtureId));
+    if (!p) {
+      // Absent de la sélection automatique du jour (plafonnée, ex. MAX_FIXTURES_PER_DAY pour le
+      // foot) — a pu être trouvé via la recherche à la demande (voir listComboCandidates) :
+      // on analyse ce match précis directement plutôt que d'échouer alors qu'il existe bien.
+      const sport = SPORTS.find((s) => s.key === key);
+      p = await sport.analyzeById(fixtureId).catch(() => null);
+    }
     if (!p) throw new Error(`Match ${fixtureId} introuvable dans l'analyse ${key} du ${date}`);
     if (p.error || !p.probabilities || p.matchState === 'finished') {
       throw new Error(`Match ${fixtureId} inutilisable (terminé ou sans probabilités exploitables)`);
