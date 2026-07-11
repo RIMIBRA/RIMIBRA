@@ -58,6 +58,14 @@ registerForm.addEventListener('submit', async (e) => {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Inscription impossible');
     setToken(data.token);
+    // Tenté ICI (dans le gestionnaire du clic "Créer mon compte"), pas après la redirection :
+    // rester dans le geste utilisateur augmente les chances que le navigateur affiche vraiment
+    // sa popup d'autorisation au lieu de la bloquer silencieusement (heuristique anti-spam de
+    // Chrome notamment sur les demandes de permission hors interaction directe). silent=true :
+    // un refus ou une erreur ne doit jamais bloquer l'inscription elle-même.
+    if (typeof enablePushNotifications === 'function' && pushSupported()) {
+      await enablePushNotifications(true).catch(() => {});
+    }
     window.location.href = '/';
   } catch (err) {
     showError(err.message);
