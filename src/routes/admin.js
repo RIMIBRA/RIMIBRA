@@ -115,7 +115,8 @@ router.get('/combo-candidates', async (req, res) => {
   try {
     const sport = req.query.sport || 'football';
     const date = req.query.date || new Date().toISOString().split('T')[0];
-    const candidates = await listComboCandidates(sport, date);
+    const query = (req.query.q || '').trim();
+    const candidates = await listComboCandidates(sport, date, query || undefined);
     res.json({ sport, date, count: candidates.length, candidates });
   } catch (err) {
     res.status(500).json({ error: err.message });

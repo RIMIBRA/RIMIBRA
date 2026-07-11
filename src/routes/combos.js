@@ -21,13 +21,13 @@ const handballApi = require('../api/handballClient');
 const tennisApi = require('../api/tennisClient');
 
 const SPORTS = [
-  { key: 'football', label: '⚽ Football', analyzeDay: football.analyzeDayFixtures, byId: (id) => footballApi.getFixtureById(id) },
-  { key: 'nfl', label: '🏈 NFL', analyzeDay: nfl.analyzeDayGames, byId: (id) => nflApi.getGameById(id) },
-  { key: 'nba', label: '🏀 Basketball', analyzeDay: nba.analyzeDayGames, byId: (id) => nbaApi.getGameById(id) },
-  { key: 'hockey', label: '🏒 Hockey', analyzeDay: hockey.analyzeDayGames, byId: (id) => hockeyApi.getGameById(id) },
-  { key: 'baseball', label: '⚾ Baseball', analyzeDay: baseball.analyzeDayGames, byId: (id) => baseballApi.getGameById(id) },
-  { key: 'handball', label: '🤾 Handball', analyzeDay: handball.analyzeDayGames, byId: (id) => handballApi.getGameById(id) },
-  { key: 'tennis', label: '🎾 Tennis', analyzeDay: tennis.analyzeDayGames, byId: (id) => tennisApi.getGameById(id) },
+  { key: 'football', label: '⚽ Football', analyzeDay: football.analyzeDayFixtures, search: football.searchFixtures, byId: (id) => footballApi.getFixtureById(id) },
+  { key: 'nfl', label: '🏈 NFL', analyzeDay: nfl.analyzeDayGames, search: nfl.searchGames, byId: (id) => nflApi.getGameById(id) },
+  { key: 'nba', label: '🏀 Basketball', analyzeDay: nba.analyzeDayGames, search: nba.searchGames, byId: (id) => nbaApi.getGameById(id) },
+  { key: 'hockey', label: '🏒 Hockey', analyzeDay: hockey.analyzeDayGames, search: hockey.searchGames, byId: (id) => hockeyApi.getGameById(id) },
+  { key: 'baseball', label: '⚾ Baseball', analyzeDay: baseball.analyzeDayGames, search: baseball.searchGames, byId: (id) => baseballApi.getGameById(id) },
+  { key: 'handball', label: '🤾 Handball', analyzeDay: handball.analyzeDayGames, search: handball.searchGames, byId: (id) => handballApi.getGameById(id) },
+  { key: 'tennis', label: '🎾 Tennis', analyzeDay: tennis.analyzeDayGames, search: tennis.searchGames, byId: (id) => tennisApi.getGameById(id) },
 ];
 
 const FINISHED_STATUSES = ['FT', 'AET', 'PEN', 'AWD', 'WO'];
@@ -174,11 +174,14 @@ function buildComboMatches(predictions, usedIds, leagueIds, rankFn = pickProbabi
 
 // Liste les matchs du jour utilisables dans un combiné manuel (voir createManualCombo) —
 // TOUS les matchs analysés avec des probabilités, sans le filtre de ligues automatique :
-// le fondateur choisit librement depuis le dashboard admin.
-async function listComboCandidates(sportKey, date) {
+// le fondateur choisit librement depuis le dashboard admin. query (optionnel) bascule sur la
+// recherche à la demande de chaque sport (searchFixtures/searchGames) au lieu de la sélection
+// automatique du jour (plafonnée à MAX_FIXTURES_PER_DAY, ex. 30 pour le foot) — retrouve un
+// match précis même hors de cette sélection, comme la recherche publique de l'app.
+async function listComboCandidates(sportKey, date, query) {
   const sport = SPORTS.find((s) => s.key === sportKey);
   if (!sport) throw new Error(`Sport inconnu : ${sportKey}`);
-  const { results } = await sport.analyzeDay(date);
+  const { results } = query ? await sport.search(date, query) : await sport.analyzeDay(date);
   const candidates = results.filter((p) => !p.error && !p.insufficientData && p.matchState !== 'finished' && p.probabilities);
 
   // Cotes réelles "nombre de sets" (tennis uniquement, voir resolveSetsMarket) — un appel par
