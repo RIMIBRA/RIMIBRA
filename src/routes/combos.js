@@ -69,12 +69,61 @@ function isComboCandidate(p, usedIds, leagueIds) {
 // Marchés qu'un combiné manuel peut cibler par match (voir createManualCombo) — BTTS et total
 // de buts viennent de la prédiction Poisson (goalPrediction, voir algorithm/goals.js), calculée
 // uniquement pour le foot avec données de forme suffisantes. Absente -> erreur explicite plutôt
-// qu'une probabilité inventée pour les sports/matchs qui n'ont pas cette donnée.
+// qu'une probabilité inventée pour les sports/matchs qui n'ont pas cette donnée. Lignes générées
+// dynamiquement (0.5 à 5.5) depuis les champs over05..over55 déjà calculés par goals.js —
+// g[field] == null (ex. mode web dégradé sans cette ligne) -> resolveBetSelection le traite
+// comme "marché indisponible" plutôt que de renvoyer une probabilité manquante.
+const TOTAL_LINE_KEYS = ['05', '15', '25', '35', '45', '55'];
+function formatLine(key) { return `${key[0]},${key.slice(1)}`; } // '05' -> '0,5', '35' -> '3,5'...
+
 const GOAL_MARKETS = {
   btts_yes: (g) => ({ pick: 'BTTS Oui', probability: g.btts }),
   btts_no: (g) => ({ pick: 'BTTS Non', probability: 100 - g.btts }),
-  over25: (g) => ({ pick: '+2,5 buts', probability: g.over25 }),
-  under25: (g) => ({ pick: '-2,5 buts', probability: 100 - g.over25 }),
+};
+for (const line of TOTAL_LINE_KEYS) {
+  const field = `over${line}`;
+  GOAL_MARKETS[`over${line}`] = (g) => (g[field] == null ? null : { pick: `+${formatLine(line)} buts`, probability: g[field] });
+  GOAL_MARKETS[`under${line}`] = (g) => (g[field] == null ? null : { pick: `-${formatLine(line)} buts`, probability: 100 - g[field] });
+}
+
+// Marchés combinés (1X2/Double Chance/Total × BTTS) — PAS une vraie probabilité conjointe :
+// simple produit des deux probabilités individuelles (P(A) × P(B)), en supposant l'indépendance.
+// C'est une approximation (score et BTTS ne sont pas réellement indépendants) — le pick renvoyé
+// porte explicitement "(estimation)" pour ne jamais laisser croire à une précision qu'on n'a
+// pas, contrairement aux autres marchés qui viennent d'un vrai calcul ou de vraies cotes.
+function combinedPick(baseLabel, baseProb, bttsLabel, bttsProb) {
+  return {
+    pick: `${baseLabel} + BTTS ${bttsLabel} (estimation)`,
+    probability: Math.round((baseProb / 100) * (bttsProb / 100) * 100),
+  };
+}
+
+function doubleChanceProb(p, side) {
+  const home = p.probabilities.home;
+  const draw = p.probabilities.draw ?? 0;
+  const away = p.probabilities.away;
+  if (side === '1x') return Math.min(100, home + draw);
+  if (side === '12') return Math.min(100, home + away);
+  return Math.min(100, draw + away); // '2x'
+}
+
+const COMBINED_MARKETS = {
+  '1_btts_yes':       (p, g) => combinedPick('1', p.probabilities.home, 'Oui', g.btts),
+  '1_btts_no':        (p, g) => combinedPick('1', p.probabilities.home, 'Non', 100 - g.btts),
+  'x_btts_yes':        (p, g) => combinedPick('X', p.probabilities.draw ?? 0, 'Oui', g.btts),
+  'x_btts_no':         (p, g) => combinedPick('X', p.probabilities.draw ?? 0, 'Non', 100 - g.btts),
+  '2_btts_yes':        (p, g) => combinedPick('2', p.probabilities.away, 'Oui', g.btts),
+  '2_btts_no':         (p, g) => combinedPick('2', p.probabilities.away, 'Non', 100 - g.btts),
+  'dc_1x_btts_yes':    (p, g) => combinedPick('1X', doubleChanceProb(p, '1x'), 'Oui', g.btts),
+  'dc_1x_btts_no':     (p, g) => combinedPick('1X', doubleChanceProb(p, '1x'), 'Non', 100 - g.btts),
+  'dc_12_btts_yes':    (p, g) => combinedPick('12', doubleChanceProb(p, '12'), 'Oui', g.btts),
+  'dc_12_btts_no':     (p, g) => combinedPick('12', doubleChanceProb(p, '12'), 'Non', 100 - g.btts),
+  'dc_2x_btts_yes':    (p, g) => combinedPick('2X', doubleChanceProb(p, '2x'), 'Oui', g.btts),
+  'dc_2x_btts_no':     (p, g) => combinedPick('2X', doubleChanceProb(p, '2x'), 'Non', 100 - g.btts),
+  'over25_btts_yes':   (p, g) => combinedPick('+2,5 buts', g.over25, 'Oui', g.btts),
+  'over25_btts_no':    (p, g) => combinedPick('+2,5 buts', g.over25, 'Non', 100 - g.btts),
+  'under25_btts_yes':  (p, g) => combinedPick('-2,5 buts', 100 - g.over25, 'Oui', g.btts),
+  'under25_btts_no':   (p, g) => combinedPick('-2,5 buts', 100 - g.over25, 'Non', 100 - g.btts),
 };
 
 // Marché "nombre de sets" (tennis uniquement) — betType encode la ligne choisie, ex.
@@ -105,17 +154,30 @@ async function resolveBetSelection(p, betType) {
   if (betType === '1') return { pick: '1 (Domicile)', probability: p.probabilities.home };
   if (betType === 'X') return { pick: 'X (Nul)', probability: p.probabilities.draw ?? 0 };
   if (betType === '2') return { pick: '2 (Extérieur)', probability: p.probabilities.away };
+  // Double chance : dérivé arithmétique réel des probabilités 1X2 déjà calculées (pas une
+  // approximation, contrairement aux marchés combinés avec BTTS ci-dessous).
+  if (betType === 'dc_1x') return { pick: '1X (Double Chance)', probability: doubleChanceProb(p, '1x') };
+  if (betType === 'dc_12') return { pick: '12 (Double Chance)', probability: doubleChanceProb(p, '12') };
+  if (betType === 'dc_2x') return { pick: '2X (Double Chance)', probability: doubleChanceProb(p, '2x') };
   if (betType.startsWith('sets_')) {
     const result = await resolveSetsMarket(p.fixture.id, betType);
     if (!result) throw new Error(`Marché "${betType}" inconnu`);
     return result;
+  }
+  if (COMBINED_MARKETS[betType]) {
+    if (!p.goalPrediction) {
+      throw new Error(`Marché "${betType}" indisponible pour ${p.fixture.home} - ${p.fixture.away} (pas de prédiction de buts pour ce match)`);
+    }
+    return COMBINED_MARKETS[betType](p, p.goalPrediction);
   }
   const goalMarket = GOAL_MARKETS[betType];
   if (!goalMarket) throw new Error(`Marché "${betType}" inconnu`);
   if (!p.goalPrediction) {
     throw new Error(`Marché "${betType}" indisponible pour ${p.fixture.home} - ${p.fixture.away} (pas de prédiction de buts pour ce match)`);
   }
-  return goalMarket(p.goalPrediction);
+  const result = goalMarket(p.goalPrediction);
+  if (!result) throw new Error(`Marché "${betType}" indisponible (ligne non calculée pour ce match)`);
+  return result;
 }
 
 // Un match a de la "couverture média" s'il est suivi par au moins une source de cotes/pronostics
@@ -211,7 +273,17 @@ async function listComboCandidates(sportKey, date, query) {
     // Exposés pour que le dashboard admin propose un marché par match (1/X/2, BTTS, total de
     // buts, nombre de sets) au lieu de figer le pick recommandé par l'algo — voir resolveBetSelection.
     probabilities: p.probabilities,
-    goalPrediction: p.goalPrediction ? { btts: p.goalPrediction.btts, over25: p.goalPrediction.over25 } : null,
+    goalPrediction: p.goalPrediction
+      ? {
+          btts: p.goalPrediction.btts,
+          over05: p.goalPrediction.over05,
+          over15: p.goalPrediction.over15,
+          over25: p.goalPrediction.over25,
+          over35: p.goalPrediction.over35,
+          over45: p.goalPrediction.over45,
+          over55: p.goalPrediction.over55,
+        }
+      : null,
     setsMarkets: sportKey === 'tennis' ? await tennisApi.getSetsMarkets(p.fixture.id).catch(() => null) : null,
   }));
 
