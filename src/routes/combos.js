@@ -482,6 +482,70 @@ async function getSpecialComboSeries(date) {
   return enriched;
 }
 
+// Le score final valide-t-il match.betType ? (home/away = buts pour les sports à but, sets
+// gagnés pour le tennis — voir api/tennisClient.js normalizeFixture). Remplace l'ancienne
+// validation "match.pick.startsWith(actualPick)" qui ne savait comparer QUE des picks 1X2 :
+// devenue fausse pour BTTS/Totaux/Double Chance/marchés combinés/sets depuis leur ajout au
+// combiné manuel (elle marquait ces marchés "non validé" quasi systématiquement, quel que soit
+// le résultat réel réel). betType absent (combinés automatiques, ou 'algo' explicite) -> même
+// comportement qu'avant, sur le pick 1X2 recommandé par l'algo.
+function base1x2Hit(baseKey, actual1x2) {
+  if (baseKey === '1') return actual1x2 === '1';
+  if (baseKey === 'x') return actual1x2 === 'X';
+  if (baseKey === '2') return actual1x2 === '2';
+  if (baseKey === 'dc_1x') return actual1x2 !== '2';
+  if (baseKey === 'dc_12') return actual1x2 !== 'X';
+  if (baseKey === 'dc_2x') return actual1x2 !== '1';
+  return null;
+}
+
+function validateBetOutcome(betType, pick, home, away) {
+  const actual1x2 = home > away ? '1' : away > home ? '2' : 'X';
+  const type = betType || 'algo';
+
+  if (type === 'algo') return pick.startsWith(actual1x2);
+
+  const simpleKey = type === '1' ? '1' : type === 'X' ? 'x' : type === '2' ? '2' : type;
+  const simpleHit = base1x2Hit(simpleKey, actual1x2);
+  if (simpleHit !== null) return simpleHit;
+
+  const totalGoals = home + away;
+  const bttsHit = home > 0 && away > 0;
+
+  if (type === 'btts_yes') return bttsHit;
+  if (type === 'btts_no') return !bttsHit;
+
+  const totalMatch = /^(over|under)(05|15|25|35|45|55)$/.exec(type);
+  if (totalMatch) {
+    const [, side, lineKey] = totalMatch;
+    const line = Number(`${lineKey[0]}.${lineKey.slice(1)}`);
+    return side === 'over' ? totalGoals > line : totalGoals < line;
+  }
+
+  // Tennis : home/away = sets gagnés par joueur -> total = nombre de sets joués
+  const setsMatch = /^sets_(over|under)_([\d.]+)$/.exec(type);
+  if (setsMatch) {
+    const [, side, lineStr] = setsMatch;
+    const totalSets = home + away;
+    const line = Number(lineStr);
+    return side === 'over' ? totalSets > line : totalSets < line;
+  }
+
+  const combinedMatch = /^(1|x|2|dc_1x|dc_12|dc_2x|over25|under25)_btts_(yes|no)$/.exec(type);
+  if (combinedMatch) {
+    const [, base, bttsSide] = combinedMatch;
+    const baseHit = base === 'over25' ? totalGoals > 2.5
+      : base === 'under25' ? totalGoals < 2.5
+      : base1x2Hit(base, actual1x2);
+    const bttsSideHit = bttsSide === 'yes' ? bttsHit : !bttsHit;
+    return baseHit && bttsSideHit;
+  }
+
+  // Marché non reconnu (ne devrait pas arriver) -> repli sur l'ancien comportement 1X2 plutôt
+  // que de planter la résolution du combiné
+  return pick.startsWith(actual1x2);
+}
+
 async function enrichMatchStatus(sport, match) {
   try {
     // Un match de combiné multi-sports porte son propre champ `sport` ; les combinés
@@ -498,8 +562,7 @@ async function enrichMatchStatus(sport, match) {
     const away = raw.goals?.away;
     if (home == null || away == null) return { ...match, finished: true, validated: null };
 
-    const actualPick = home > away ? '1' : away > home ? '2' : 'X';
-    const validated = match.pick.startsWith(actualPick);
+    const validated = validateBetOutcome(match.betType, match.pick, home, away);
     return { ...match, finished: true, validated, actualScore: { home, away } };
   } catch {
     return { ...match, finished: false, validated: null };
@@ -760,3 +823,4 @@ module.exports.MULTI_LABEL = MULTI_LABEL;
 module.exports.SPECIAL_LABEL = SPECIAL_LABEL;
 module.exports.resolveBetSelection = resolveBetSelection;
 module.exports.getSpecialComboSeries = getSpecialComboSeries;
+module.exports.validateBetOutcome = validateBetOutcome;
