@@ -218,16 +218,69 @@ function renderManualComboSection() {
 // Mêmes marchés que resolveBetSelection côté serveur (routes/combos.js) — juste pour prévisualiser
 // le pick et la probabilité dans le dashboard ; la valeur qui compte reste recalculée côté serveur
 // à la création du combiné.
+const TOTAL_LINE_KEYS = ['05', '15', '25', '35', '45', '55'];
+function formatTotalLine(key) { return `${key[0]},${key.slice(1)}`; } // '05' -> '0,5', '35' -> '3,5'...
+
+function doubleChancePreview(probs, side) {
+  const home = probs.home ?? 0, draw = probs.draw ?? 0, away = probs.away ?? 0;
+  if (side === '1x') return Math.min(100, home + draw);
+  if (side === '12') return Math.min(100, home + away);
+  return Math.min(100, draw + away); // '2x'
+}
+
+// Base (label, probabilité) des marchés combinés avec BTTS — mêmes clés que COMBINED_MARKETS
+// côté serveur (routes/combos.js).
+function combinedBaseFor(key, probs, g) {
+  const draw = probs.draw ?? 0;
+  switch (key) {
+    case '1': return ['1', probs.home];
+    case 'x': return ['X', draw];
+    case '2': return ['2', probs.away];
+    case 'dc_1x': return ['1X', doubleChancePreview(probs, '1x')];
+    case 'dc_12': return ['12', doubleChancePreview(probs, '12')];
+    case 'dc_2x': return ['2X', doubleChancePreview(probs, '2x')];
+    case 'over25': return ['+2,5 buts', g?.over25];
+    case 'under25': return ['-2,5 buts', g ? 100 - g.over25 : undefined];
+    default: return [null, null];
+  }
+}
+
 function resolveBetPreview(candidate, betType) {
   const probs = candidate.probabilities || {};
+  const draw = probs.draw ?? 0;
   const g = candidate.goalPrediction;
+
   if (betType === '1') return { pick: '1 (Domicile)', prob: probs.home };
-  if (betType === 'X') return { pick: 'X (Nul)', prob: probs.draw ?? 0 };
+  if (betType === 'X') return { pick: 'X (Nul)', prob: draw };
   if (betType === '2') return { pick: '2 (Extérieur)', prob: probs.away };
+  if (betType === 'dc_1x') return { pick: '1X (Double Chance)', prob: doubleChancePreview(probs, '1x') };
+  if (betType === 'dc_12') return { pick: '12 (Double Chance)', prob: doubleChancePreview(probs, '12') };
+  if (betType === 'dc_2x') return { pick: '2X (Double Chance)', prob: doubleChancePreview(probs, '2x') };
   if (betType === 'btts_yes') return g ? { pick: 'BTTS Oui', prob: g.btts } : null;
   if (betType === 'btts_no') return g ? { pick: 'BTTS Non', prob: 100 - g.btts } : null;
-  if (betType === 'over25') return g ? { pick: '+2,5 buts', prob: g.over25 } : null;
-  if (betType === 'under25') return g ? { pick: '-2,5 buts', prob: 100 - g.over25 } : null;
+
+  const totalMatch = /^(over|under)(05|15|25|35|45|55)$/.exec(betType);
+  if (totalMatch) {
+    if (!g) return null;
+    const [, side, line] = totalMatch;
+    const raw = g[`over${line}`];
+    if (raw == null) return null;
+    return { pick: `${side === 'over' ? '+' : '-'}${formatTotalLine(line)} buts`, prob: side === 'over' ? raw : 100 - raw };
+  }
+
+  const combinedMatch = /^(1|x|2|dc_1x|dc_12|dc_2x|over25|under25)_btts_(yes|no)$/.exec(betType);
+  if (combinedMatch) {
+    if (!g) return null;
+    const [, baseKey, bttsSide] = combinedMatch;
+    const [baseLabel, baseProb] = combinedBaseFor(baseKey, probs, g);
+    if (baseProb == null) return null;
+    const bttsProb = bttsSide === 'yes' ? g.btts : 100 - g.btts;
+    return {
+      pick: `${baseLabel} + BTTS ${bttsSide === 'yes' ? 'Oui' : 'Non'} (estimation)`,
+      prob: Math.round((baseProb / 100) * (bttsProb / 100) * 100),
+    };
+  }
+
   if (betType.startsWith('sets_')) {
     const m = /^sets_(over|under)_([\d.]+)$/.exec(betType);
     const entry = m && candidate.setsMarkets?.find((s) => s.side === m[1] && s.line === m[2]);
@@ -237,31 +290,78 @@ function resolveBetPreview(candidate, betType) {
 }
 
 function buildBetTypeOptions(c, selected) {
-  const opts = [
+  const probs = c.probabilities || {};
+  const draw = probs.draw ?? 0;
+  const hasDraw = draw > 0;
+  const g = c.goalPrediction;
+  const groups = [];
+
+  groups.push({ label: 'Pronostic', opts: [
     { v: 'algo', label: `Pronostic algo — ${c.pick} (${c.probability}%)` },
-    { v: '1', label: `1 · Victoire ${c.home} (${c.probabilities?.home ?? '?'}%)` },
-    { v: 'X', label: `X · Match nul (${c.probabilities?.draw ?? 0}%)` },
-    { v: '2', label: `2 · Victoire ${c.away} (${c.probabilities?.away ?? '?'}%)` },
+  ] });
+
+  const oneX2Opts = [
+    { v: '1', label: `1 · Victoire ${c.home} (${probs.home ?? '?'}%)` },
+    { v: 'X', label: `X · Match nul (${draw}%)` },
+    { v: '2', label: `2 · Victoire ${c.away} (${probs.away ?? '?'}%)` },
   ];
-  if (c.goalPrediction) {
-    opts.push(
-      { v: 'btts_yes', label: `BTTS · Oui (${c.goalPrediction.btts}%)` },
-      { v: 'btts_no', label: `BTTS · Non (${100 - c.goalPrediction.btts}%)` },
-      { v: 'over25', label: `Total buts · +2,5 (${c.goalPrediction.over25}%)` },
-      { v: 'under25', label: `Total buts · -2,5 (${100 - c.goalPrediction.over25}%)` },
+  if (hasDraw) {
+    oneX2Opts.push(
+      { v: 'dc_1x', label: `1X · Double Chance (${doubleChancePreview(probs, '1x')}%)` },
+      { v: 'dc_12', label: `12 · Double Chance (${doubleChancePreview(probs, '12')}%)` },
+      { v: 'dc_2x', label: `2X · Double Chance (${doubleChancePreview(probs, '2x')}%)` },
     );
   }
+  groups.push({ label: '1X2 & Double Chance', opts: oneX2Opts });
+
+  if (g) {
+    const totalOpts = [
+      { v: 'btts_yes', label: `BTTS · Oui (${g.btts}%)` },
+      { v: 'btts_no', label: `BTTS · Non (${100 - g.btts}%)` },
+    ];
+    TOTAL_LINE_KEYS.forEach((line) => {
+      const raw = g[`over${line}`];
+      if (raw == null) return;
+      const disp = formatTotalLine(line);
+      totalOpts.push(
+        { v: `over${line}`, label: `Total buts · +${disp} (${raw}%)` },
+        { v: `under${line}`, label: `Total buts · -${disp} (${100 - raw}%)` },
+      );
+    });
+    groups.push({ label: 'BTTS & Totaux', opts: totalOpts });
+
+    // Marchés combinés (1X2/Double Chance/Total × BTTS) — approximation par produit des
+    // probabilités individuelles, pas une vraie probabilité conjointe : voir combinedPick
+    // côté serveur (routes/combos.js). Toujours étiqueté "estimation" dans le libellé.
+    const combinedKeys = ['1', hasDraw ? 'x' : null, '2', hasDraw ? 'dc_1x' : null, hasDraw ? 'dc_12' : null, hasDraw ? 'dc_2x' : null, 'over25', 'under25'].filter(Boolean);
+    const combinedOpts = [];
+    combinedKeys.forEach((key) => {
+      const [baseLabel, baseProb] = combinedBaseFor(key, probs, g);
+      if (baseProb == null) return;
+      const yesProb = Math.round((baseProb / 100) * (g.btts / 100) * 100);
+      const noProb = Math.round((baseProb / 100) * ((100 - g.btts) / 100) * 100);
+      combinedOpts.push(
+        { v: `${key}_btts_yes`, label: `${baseLabel} + BTTS Oui (~${yesProb}%, estimation)` },
+        { v: `${key}_btts_no`, label: `${baseLabel} + BTTS Non (~${noProb}%, estimation)` },
+      );
+    });
+    groups.push({ label: 'Marchés combinés (estimation)', opts: combinedOpts });
+  }
+
   // Nombre de sets (tennis) : cotes réelles, une option par ligne dispo pour ce match (2.5,
   // 3.5, 4.5 selon best-of-3/5) — voir api/tennisClient.js getSetsMarkets.
   if (c.setsMarkets?.length) {
-    c.setsMarkets
+    const setsOpts = c.setsMarkets
       .slice()
       .sort((a, b) => Number(a.line) - Number(b.line) || (a.side === 'over' ? -1 : 1))
-      .forEach((s) => {
-        opts.push({ v: `sets_${s.side}_${s.line}`, label: `Total sets · ${s.side === 'over' ? '+' : '-'}${s.line} (~${s.probability}%)` });
-      });
+      .map((s) => ({ v: `sets_${s.side}_${s.line}`, label: `Total sets · ${s.side === 'over' ? '+' : '-'}${s.line} (~${s.probability}%)` }));
+    groups.push({ label: 'Tennis — Nombre de sets', opts: setsOpts });
   }
-  return opts.map((o) => `<option value="${o.v}" ${o.v === selected ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('');
+
+  return groups
+    .filter((grp) => grp.opts.length > 0)
+    .map((grp) => `<optgroup label="${escapeHtml(grp.label)}">${grp.opts.map((o) => `<option value="${o.v}" ${o.v === selected ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}</optgroup>`)
+    .join('');
 }
 
 function updateComboSummary() {
