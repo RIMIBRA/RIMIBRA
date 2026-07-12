@@ -57,6 +57,94 @@ header h1 { font-size: 1.4rem; }
 #account-status .plan-premium { background: rgba(88,166,255,0.15); color: var(--blue); }
 #account-status .plan-vip { background: rgba(188,140,255,0.15); color: var(--purple); }
 #account-status .plan-admin { background: rgba(210,153,34,0.15); color: var(--yellow); }
+
+/* Cloche de notifications (boîte in-app, voir routes/notifications.js) */
+.notif-wrap { position: relative; }
+
+.notif-bell {
+  position: relative;
+  background: none;
+  border: none;
+  color: var(--text);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0.3rem;
+  border-radius: 6px;
+}
+.notif-bell:hover { background: rgba(255,255,255,0.06); }
+.notif-bell:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+
+.api-status .notif-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--red);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+
+.notif-panel {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 8px);
+  right: 0;
+  width: 320px;
+  max-height: 400px;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  overflow: hidden;
+}
+.notif-panel.hidden { display: none; }
+
+.notif-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+.notif-panel-header button {
+  background: none;
+  border: none;
+  color: var(--blue);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+#notif-list { overflow-y: auto; }
+
+.notif-empty { padding: 1.2rem 0.8rem; color: var(--muted); font-size: 0.82rem; text-align: center; }
+
+.notif-item {
+  display: block;
+  padding: 0.6rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+  color: var(--text);
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-item:hover { background: rgba(255,255,255,0.04); }
+.notif-item.unread { background: rgba(88,166,255,0.08); }
+.notif-item.unread .notif-item-title::before { content: '● '; color: var(--blue); }
+.notif-item-title { font-size: 0.85rem; font-weight: 600; }
+.notif-item-body { font-size: 0.78rem; color: var(--muted); margin-top: 0.15rem; }
+.notif-item-time { font-size: 0.7rem; color: var(--muted); margin-top: 0.3rem; }
 #dashboard-link { margin-left: 0.25rem; }
 
 .sport-tabs {

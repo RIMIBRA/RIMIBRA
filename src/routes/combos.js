@@ -3,7 +3,7 @@ const router = express.Router();
 const { canAccessSport, comboLimitFor, hasAccess } = require('../auth/tiers');
 const { getCombosForSport, saveCombo, markComboNotified } = require('../db/combos');
 const { mapWithConcurrency } = require('../utils/concurrency');
-const { broadcastPush } = require('../push/webPush');
+const { notifyAllUsers } = require('../push/webPush');
 
 const football = require('../algorithm/predictor');
 const nfl = require('../algorithm/nflPredictor');
@@ -361,16 +361,17 @@ async function createManualCombo(date, selections, options = {}) {
 
   await saveCombo(date, comboSport, comboLabel, matches, combinedProbability, risk);
 
-  // Notifie TOUS les abonnés dès la création d'un combiné Spécial (gratuit compris — créer
-  // l'envie) — jamais bloquant pour la réponse admin (pas d'await), échecs individuels gérés
-  // dans webPush.js. Combiné encore actif -> pas encore visible en gratuit (voir /today plus
-  // bas), donc le clic renvoie vers la page tarifs plutôt que vers un contenu verrouillé.
+  // Notifie TOUS les utilisateurs dès la création d'un combiné Spécial (gratuit compris — créer
+  // l'envie), à la fois dans leur boîte de notifications in-app et en push s'ils y sont abonnés
+  // — jamais bloquant pour la réponse admin (pas d'await), échecs individuels gérés dans
+  // webPush.js. Combiné encore actif -> pas encore visible en gratuit (voir /today plus bas),
+  // donc le clic renvoie vers la page tarifs plutôt que vers un contenu verrouillé.
   if (special) {
-    broadcastPush((sub) => ({
+    notifyAllUsers((user) => ({
       title: '🌟 Nouveau combiné spécial',
       body: `${matches.length} matchs · ${combinedProbability}% de probabilité combinée`,
-      url: (sub.isAdmin || hasAccess(sub.plan, 'premium')) ? '/?sport=combos' : '/pricing.html',
-    })).catch((err) => console.error('Notification push (combiné spécial créé) ignorée:', err.message));
+      url: (user.is_admin || hasAccess(user.plan, 'premium')) ? '/?sport=combos' : '/pricing.html',
+    })).catch((err) => console.error('Notification (combiné spécial créé) ignorée:', err.message));
   }
 
   return { sport: comboSport, matches, combinedProbability, risk };
@@ -499,6 +500,28 @@ function base1x2Hit(baseKey, actual1x2) {
   return null;
 }
 
+// Un marché est "verrouillé" avant la fin du match si son issue ne peut plus changer quel que
+// soit ce qui se passe ensuite dans le match — seulement les issues qui ne peuvent aller que
+// dans un sens (un but déjà marqué ou un set déjà joué ne s'annule pas). BTTS Non / Under X /
+// 1X2 / Double Chance / marchés combinés restent volontairement exclus : leur issue peut encore
+// changer jusqu'au coup de sifflet final, mieux vaut rester "en attente" qu'annoncer trop tôt.
+function isOutcomeLockedIn(betType, home, away) {
+  const type = betType || 'algo';
+  if (type === 'btts_yes') return home > 0 && away > 0;
+
+  const totalMatch = /^over(05|15|25|35|45|55)$/.exec(type);
+  if (totalMatch) {
+    const line = Number(`${totalMatch[1][0]}.${totalMatch[1].slice(1)}`);
+    return (home + away) > line;
+  }
+
+  // Tennis : home/away = sets gagnés par joueur -> total = nombre de sets déjà joués
+  const setsMatch = /^sets_over_([\d.]+)$/.exec(type);
+  if (setsMatch) return (home + away) > Number(setsMatch[1]);
+
+  return false;
+}
+
 function validateBetOutcome(betType, pick, home, away) {
   const actual1x2 = home > away ? '1' : away > home ? '2' : 'X';
   const type = betType || 'algo';
@@ -556,10 +579,20 @@ async function enrichMatchStatus(sport, match) {
     if (!raw) return { ...match, finished: false, validated: null };
 
     const finished = FINISHED_STATUSES.includes(raw.fixture.status.short);
-    if (!finished) return { ...match, finished: false, validated: null };
-
     const home = raw.goals?.home;
     const away = raw.goals?.away;
+
+    if (!finished) {
+      // Match encore en cours : certains marchés sont déjà mathématiquement acquis avant la
+      // fin (un but ou un set déjà joué ne s'annule pas, voir isOutcomeLockedIn) — affiche ce
+      // signal par match sans jamais déclarer le COMBINÉ entier gagné avant la fin réelle de
+      // tous ses matchs (summarize() exige toujours finished=true partout pour ça).
+      if (home != null && away != null && isOutcomeLockedIn(match.betType, home, away)) {
+        return { ...match, finished: false, validated: true, actualScore: { home, away } };
+      }
+      return { ...match, finished: false, validated: null };
+    }
+
     if (home == null || away == null) return { ...match, finished: true, validated: null };
 
     const validated = validateBetOutcome(match.betType, match.pick, home, away);
@@ -773,12 +806,12 @@ async function checkSpecialComboResolutions(date) {
     await markComboNotified(row.id);
     const outcome = status === 'won' ? '🏆 gagné' : '❌ perdu';
     // Résolu -> visible en gratuit aussi (voir /today plus haut), donc même URL pour tout le
-    // monde : pas besoin de builder par abonné ici, contrairement à la notif de création.
-    broadcastPush(() => ({
+    // monde : pas besoin de builder par utilisateur ici, contrairement à la notif de création.
+    notifyAllUsers(() => ({
       title: `Combiné spécial ${outcome}`,
       body: `${row.matches.length} matchs · ${row.combined_probability}% — résultat disponible`,
       url: '/?sport=combos',
-    })).catch((err) => console.error('Notification push (résolution combiné spécial) ignorée:', err.message));
+    })).catch((err) => console.error('Notification (résolution combiné spécial) ignorée:', err.message));
   }
 }
 
@@ -824,3 +857,4 @@ module.exports.SPECIAL_LABEL = SPECIAL_LABEL;
 module.exports.resolveBetSelection = resolveBetSelection;
 module.exports.getSpecialComboSeries = getSpecialComboSeries;
 module.exports.validateBetOutcome = validateBetOutcome;
+module.exports.isOutcomeLockedIn = isOutcomeLockedIn;
