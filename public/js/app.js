@@ -865,6 +865,98 @@ function shiftDate(days) {
 btnDayPrev.addEventListener('click', () => shiftDate(-1));
 btnDayNext.addEventListener('click', () => shiftDate(1));
 
+// Guide d'utilisation — pour tous les visiteurs, connectés ou non (voir demande : aider ceux qui
+// ne comprennent pas l'interface). Réutilise la modale existante (voir #modal plus haut) plutôt
+// que d'en construire une nouvelle. Contenu statique, pas de tour interactif : on explique une
+// fois, le bouton ❓ reste disponible pour le rouvrir n'importe quand.
+function buildGuideContent() {
+  return `
+    <div class="detail-section">
+      <h3>👋 Bienvenue sur footpredictongoal</h3>
+      <p style="color:var(--muted);font-size:0.85rem;line-height:1.6">
+        Ce site analyse des matchs de foot, NFL, basket, hockey, baseball, handball et tennis pour
+        te donner des probabilités statistiques — pas des certitudes, juste des chiffres pour
+        t'aider à te faire une idée.
+      </p>
+    </div>
+
+    <div class="detail-section">
+      <h3>📊 Lire une carte de match</h3>
+      <div class="grid-2" style="grid-template-columns:1fr 1fr 1fr">
+        <div class="stat-box"><div class="label">1 Dom</div><div class="value" style="color:var(--green)">65%</div></div>
+        <div class="stat-box"><div class="label">X Nul</div><div class="value" style="color:var(--yellow)">20%</div></div>
+        <div class="stat-box"><div class="label">2 Ext</div><div class="value" style="color:var(--purple)">15%</div></div>
+      </div>
+      <p style="color:var(--muted);font-size:0.8rem;margin-top:0.5rem;line-height:1.6">
+        Ces trois pourcentages (chances de victoire à domicile, de match nul, de victoire à
+        l'extérieur) totalisent toujours 100%. Pour le foot, tu verras aussi
+        <strong>+2,5 buts</strong> (probabilité de plus de 2,5 buts au total) et <strong>BTTS</strong>
+        ("les deux équipes marquent"). Le badge <strong>Confiance</strong> (Faible/Moyenne/Élevée)
+        indique à quel point l'algorithme est sûr de son pronostic.
+      </p>
+    </div>
+
+    <div class="detail-section">
+      <h3>⚽ Onglets & filtres</h3>
+      <p style="color:var(--muted);font-size:0.8rem;line-height:1.6">
+        Chaque sport a son propre onglet en haut. <strong>Statut</strong> sépare les matchs à
+        venir, en cours et terminés. <strong>Afficher</strong> limite la liste aux meilleurs
+        pronostics du jour (Top 10/5/3/2 — Top 3 et Top 2 sont réservés Premium/VIP).
+      </p>
+    </div>
+
+    <div class="detail-section">
+      <h3>🔍 Recherche</h3>
+      <p style="color:var(--muted);font-size:0.8rem;line-height:1.6">
+        Un match précis n'apparaît pas dans la liste ? La barre de recherche (Premium/VIP) va le
+        chercher n'importe où dans la journée, même hors de la sélection automatique affichée par
+        défaut.
+      </p>
+    </div>
+
+    <div class="detail-section">
+      <h3>🎯 Combinés</h3>
+      <p style="color:var(--muted);font-size:0.8rem;line-height:1.6">
+        Plusieurs matchs regroupés dont TOUS les pronostics doivent se réaliser pour gagner le
+        combiné. Chaque sport a sa propre série, plus un combiné <strong>🌍 Multi-sports</strong>
+        qui mélange les disciplines. La section <strong>🌟 Spécial</strong> met en avant des
+        combinés choisis à la main par l'équipe — réservée Premium/VIP tant que le combiné n'est
+        pas encore joué, visible par tous une fois le résultat connu.
+      </p>
+    </div>
+
+    <div class="detail-section">
+      <h3>⭐ Plans Gratuit / Premium / VIP</h3>
+      <p style="color:var(--muted);font-size:0.8rem;line-height:1.6">
+        Gratuit donne accès au foot avec un aperçu limité. Premium débloque tous les sports, la
+        recherche et les combinés. VIP ajoute le détail complet de l'analyse et les combinés
+        illimités. Voir <a href="/pricing.html" style="color:var(--blue)">la page tarifs</a>.
+      </p>
+    </div>
+
+    <div class="detail-section">
+      <h3>🔔 Notifications</h3>
+      <p style="color:var(--muted);font-size:0.8rem;line-height:1.6">
+        Une fois connecté, active les notifications (cloche en haut) pour être alerté dès qu'un
+        combiné spécial est créé ou résolu.
+      </p>
+    </div>`;
+}
+
+function openGuide() {
+  modalContent.innerHTML = buildGuideContent();
+  modal.classList.remove('hidden');
+}
+
+document.getElementById('guide-btn')?.addEventListener('click', openGuide);
+
+// Ouverture automatique une seule fois, à la toute première visite du navigateur — ensuite
+// uniquement accessible via le bouton ❓, pour ne pas gêner les visiteurs qui reviennent.
+if (!localStorage.getItem('guideShown')) {
+  localStorage.setItem('guideShown', '1');
+  openGuide();
+}
+
 renderAccountStatus().then(() => {
   initStatus();
   loadPredictions(today);
