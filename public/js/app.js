@@ -723,12 +723,17 @@ const SPORT_EMOJI = { football: '⚽', nfl: '🏈', nba: '🏀', hockey: '🏒',
 
 function buildComboMatch(m, sportKey) {
   const time = new Date(m.fixture.date).toLocaleString('fr-FR');
-  // Dans un combiné multi-sports, chaque match porte son propre sport (m.sport) — sinon on
-  // retombe sur le sport du groupe, comme pour les combinés mono-sport classiques.
   const matchSport = m.sport || sportKey;
   const sportBadge = m.sport ? `${SPORT_EMOJI[m.sport] || ''} ` : '';
+  const storedData = JSON.stringify({
+    fixture: m.fixture,
+    pick: m.pick,
+    probability: m.probability,
+    actualScore: m.actualScore || null,
+    validated: m.validated,
+  }).replace(/'/g, '&#39;');
   return `
-    <div class="combo-match ${m.finished ? (m.validated ? 'is-validated' : 'is-failed') : ''}" data-id="${m.fixture.id}" data-sport="${matchSport}">
+    <div class="combo-match ${m.finished ? (m.validated ? 'is-validated' : 'is-failed') : ''}" data-id="${m.fixture.id}" data-sport="${matchSport}" data-match='${storedData}'>
       <div class="combo-match-league">${sportBadge}${m.fixture.league} · ${time}</div>
       <div class="combo-match-teams">${m.fixture.home} vs ${m.fixture.away}</div>
       <div class="combo-match-pick">✓ ${m.pick} <span class="combo-match-prob">${m.probability}%</span></div>
@@ -801,6 +806,33 @@ function comboMatchEndpoint(sportKey, id) {
     : `${sport.base}/game/${id}`;
 }
 
+function buildComboValidationContent(stored) {
+  const time = new Date(stored.fixture.date).toLocaleString('fr-FR');
+  const title = `<div class="modal-title">${stored.fixture.home} vs ${stored.fixture.away}</div>
+    <div class="modal-league">${stored.fixture.league} · ${time}</div>`;
+
+  if (!stored.actualScore) {
+    return `${title}<p style="margin-top:1rem;color:var(--muted)">Score final non disponible — impossible de valider la prédiction pour ce match.</p>`;
+  }
+
+  const { home, away } = stored.actualScore;
+  const actualPick = home > away ? '1' : away > home ? '2' : 'X';
+  const correct = stored.pick.startsWith(actualPick);
+
+  return `${title}
+    <div class="detail-section">
+      <h3>Résultat final</h3>
+      <div class="stat-box"><div class="label">Score</div><div class="value">${home} - ${away}</div></div>
+    </div>
+    <div class="detail-section">
+      <h3>Validation du pronostic</h3>
+      <div class="grid-2" style="grid-template-columns:1fr 1fr">
+        ${validationCard('Issue (1X2)', stored.pick, actualPick, correct)}
+        <div class="stat-box"><div class="label">Probabilité prédite</div><div class="value">${stored.probability}%</div></div>
+      </div>
+    </div>`;
+}
+
 function attachComboMatchClickHandlers(container) {
   container.querySelectorAll('.combo-match').forEach((el) => {
     el.addEventListener('click', async () => {
@@ -809,6 +841,19 @@ function attachComboMatchClickHandlers(container) {
       const finished = el.classList.contains('is-validated') || el.classList.contains('is-failed');
       modalContent.innerHTML = '<p style="text-align:center;padding:2rem;color:var(--muted)">Chargement…</p>';
       modal.classList.remove('hidden');
+
+      // Pour les matchs terminés, on utilise les données déjà stockées dans le DOM
+      // pour éviter un appel API qui échoue si le match est ancien (cache expiré)
+      if (finished && el.dataset.match) {
+        try {
+          const stored = JSON.parse(el.dataset.match);
+          modalContent.innerHTML = buildComboValidationContent(stored);
+        } catch {
+          modalContent.innerHTML = `<p style="color:var(--red)">Erreur : données du match invalides.</p>`;
+        }
+        return;
+      }
+
       try {
         const res = await fetch(comboMatchEndpoint(sportKey, id), { headers: authHeaders() });
         const data = await res.json();
