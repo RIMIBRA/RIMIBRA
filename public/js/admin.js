@@ -289,7 +289,7 @@ function resolveBetPreview(candidate, betType) {
   return { pick: candidate.pick, prob: candidate.probability };
 }
 
-function buildBetTypeOptions(c, selected) {
+function buildMarketGroups(c) {
   const probs = c.probabilities || {};
   const draw = probs.draw ?? 0;
   const hasDraw = draw > 0;
@@ -358,11 +358,52 @@ function buildBetTypeOptions(c, selected) {
     groups.push({ label: 'Tennis — Nombre de sets', opts: setsOpts });
   }
 
-  return groups
-    .filter((grp) => grp.opts.length > 0)
-    .map((grp) => `<optgroup label="${escapeHtml(grp.label)}">${grp.opts.map((o) => `<option value="${o.v}" ${o.v === selected ? 'selected' : ''}>${escapeHtml(o.label)}</option>`).join('')}</optgroup>`)
-    .join('');
+  return groups.filter((grp) => grp.opts.length > 0);
 }
+
+function findMarketLabel(groups, value) {
+  for (const grp of groups) {
+    const opt = grp.opts.find((o) => o.v === value);
+    if (opt) return opt.label;
+  }
+  return value;
+}
+
+const CHEVRON_SVG = '<svg class="chevron" width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden="true"><path d="M2.5 4.5L6 8l3.5-3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+// Sections dépliables (au clic sur l'en-tête <summary>, natif via <details>) au lieu d'un seul
+// grand <select> à ~37 options — ouvertes une par une, pas toutes en même temps (name partagé
+// -> un seul groupe ouvert à la fois dans les navigateurs qui le supportent).
+function buildMarketPickerHtml(c, selected) {
+  const groups = buildMarketGroups(c);
+  const triggerLabel = findMarketLabel(groups, selected);
+  return `
+    <div class="market-picker">
+      <button type="button" class="market-picker-trigger" data-fixture-id="${c.fixtureId}" data-value="${escapeHtml(selected)}">
+        <span class="market-picker-current">${escapeHtml(triggerLabel)}</span>
+        ${CHEVRON_SVG}
+      </button>
+      <div class="market-picker-panel hidden" role="listbox">
+        ${groups.map((grp) => `
+          <details class="market-group" name="market-group-${c.fixtureId}">
+            <summary><span>${escapeHtml(grp.label)}</span>${CHEVRON_SVG}</summary>
+            <div class="market-group-options">
+              ${grp.opts.map((o) => `<button type="button" class="market-option${o.v === selected ? ' selected' : ''}" data-value="${o.v}">${escapeHtml(o.label)}</button>`).join('')}
+            </div>
+          </details>`).join('')}
+      </div>
+    </div>`;
+}
+
+function closeAllMarketPickers() {
+  document.querySelectorAll('.market-picker.open').forEach((p) => p.classList.remove('open'));
+  document.querySelectorAll('.market-picker-panel').forEach((p) => p.classList.add('hidden'));
+}
+
+// Fermeture globale (clic en dehors, Échap) — attachée une seule fois au chargement du script,
+// pas à chaque rendu du tableau (sinon les listeners s'empileraient à chaque recherche/rechargement).
+document.addEventListener('click', () => closeAllMarketPickers());
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeAllMarketPickers(); });
 
 function updateComboSummary() {
   const summary = document.getElementById('combo-summary');
@@ -400,8 +441,8 @@ function toggleComboCandidate(cb, sport) {
     }
     if (!comboSelection.some((s) => `${s.sport}:${s.fixtureId}` === key)) {
       const candidate = currentComboCandidates.find((c) => String(c.fixtureId) === cb.dataset.fixtureId);
-      const select = document.querySelector(`.combo-bettype-select[data-fixture-id="${cb.dataset.fixtureId}"]`);
-      const betType = select ? select.value : 'algo';
+      const trigger = document.querySelector(`.market-picker-trigger[data-fixture-id="${cb.dataset.fixtureId}"]`);
+      const betType = trigger ? trigger.dataset.value : 'algo';
       const preview = resolveBetPreview(candidate, betType) || { pick: candidate.pick, prob: candidate.probability };
       comboSelection.push({
         sport, fixtureId: cb.dataset.fixtureId, betType,
@@ -437,7 +478,7 @@ function renderComboCandidatesTable(list, sport) {
     return;
   }
   container.innerHTML = `
-    <table class="admin-table">
+    <table class="admin-table combo-candidates-table">
       <thead><tr><th></th><th>Ligue</th><th>Match</th><th>Marché (pronostic)</th></tr></thead>
       <tbody>
         ${list.map((c) => {
@@ -448,7 +489,7 @@ function renderComboCandidatesTable(list, sport) {
             <td><input type="checkbox" class="combo-candidate-cb" ${existing ? 'checked' : ''} data-fixture-id="${c.fixtureId}"></td>
             <td>${escapeHtml(c.league || '')}</td>
             <td>${escapeHtml(c.home)} — ${escapeHtml(c.away)}</td>
-            <td><select class="combo-bettype-select" data-fixture-id="${c.fixtureId}" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0.25rem 0.4rem">${buildBetTypeOptions(c, betType)}</select></td>
+            <td>${buildMarketPickerHtml(c, betType)}</td>
           </tr>`;
         }).join('')}
       </tbody>
@@ -457,9 +498,33 @@ function renderComboCandidatesTable(list, sport) {
     cb.addEventListener('click', (e) => e.stopPropagation()); // ne pas ouvrir la modale en cochant
     cb.addEventListener('change', () => toggleComboCandidate(cb, sport));
   });
-  document.querySelectorAll('.combo-bettype-select').forEach((sel) => {
-    sel.addEventListener('click', (e) => e.stopPropagation());
-    sel.addEventListener('change', () => updateComboSelectionBetType(sport, sel.dataset.fixtureId, sel.value));
+  document.querySelectorAll('.market-picker-trigger').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const panel = btn.nextElementSibling;
+      const wasOpen = !panel.classList.contains('hidden');
+      closeAllMarketPickers();
+      if (!wasOpen) {
+        panel.classList.remove('hidden');
+        btn.closest('.market-picker').classList.add('open');
+      }
+    });
+  });
+  document.querySelectorAll('.market-picker-panel').forEach((panel) => {
+    panel.addEventListener('click', (e) => e.stopPropagation()); // clic dans le panneau (ex. un <summary>) ne le referme pas
+  });
+  document.querySelectorAll('.market-option').forEach((opt) => {
+    opt.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const picker = opt.closest('.market-picker');
+      const trigger = picker.querySelector('.market-picker-trigger');
+      trigger.dataset.value = opt.dataset.value;
+      trigger.querySelector('.market-picker-current').textContent = opt.textContent;
+      picker.querySelectorAll('.market-option.selected').forEach((el) => el.classList.remove('selected'));
+      opt.classList.add('selected');
+      closeAllMarketPickers();
+      updateComboSelectionBetType(sport, trigger.dataset.fixtureId, opt.dataset.value);
+    });
   });
   document.querySelectorAll('.combo-candidate-row').forEach((row) => {
     row.addEventListener('click', () => openTrackedMatchModal(sport, row.dataset.fixtureId));

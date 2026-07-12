@@ -64,3 +64,90 @@
 .plan-tag.plan-free { background: var(--border); color: var(--muted); }
 .plan-tag.plan-premium { background: rgba(88,166,255,0.15); color: var(--blue); }
 .plan-tag.plan-vip { background: rgba(188,140,255,0.15); color: var(--purple); }
+
+/* Sélecteur de marché du combiné manuel : sections dépliables (accordéon) au lieu d'un long
+   <select> à plat — voir buildMarketPickerHtml dans admin.js. */
+.combo-candidates-table { overflow: visible; } /* le panneau du picker doit pouvoir dépasser la table arrondie */
+
+.market-picker { position: relative; }
+
+.market-picker-trigger {
+  width: 100%;
+  min-width: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.82rem;
+  text-align: left;
+  cursor: pointer;
+}
+.market-picker-trigger:hover { border-color: var(--blue); }
+.market-picker-trigger:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
+.market-picker-current { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.market-picker-trigger .chevron { flex-shrink: 0; transition: transform 0.15s; color: var(--muted); }
+.market-picker.open .market-picker-trigger .chevron { transform: rotate(180deg); }
+
+.market-picker-panel {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 4px);
+  left: 0;
+  width: max-content;
+  min-width: 280px;
+  max-width: 380px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  padding: 0.35rem;
+}
+.market-picker-panel.hidden { display: none; }
+
+.market-group summary {
+  cursor: pointer;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 6px;
+}
+.market-group summary::-webkit-details-marker { display: none; }
+.market-group summary:hover { color: var(--text); background: rgba(255,255,255,0.04); }
+.market-group summary:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+.market-group[open] > summary { color: var(--blue); }
+.market-group[open] > summary .chevron { transform: rotate(180deg); }
+.market-group .chevron { transition: transform 0.15s; }
+
+/* Masquage explicite plutôt que de compter sur le comportement natif de <details> fermé
+   (display:none implicite sur le contenu) — pas fiable dans tous les moteurs de rendu. */
+.market-group-options { display: none; padding: 0.15rem 0 0.3rem; }
+.market-group[open] > .market-group-options { display: block; }
+
+.market-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: var(--text);
+  padding: 0.4rem 0.6rem 0.4rem 1.1rem;
+  font-size: 0.8rem;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.market-option:hover, .market-option:focus-visible { background: rgba(88,166,255,0.15); outline: none; }
+.market-option.selected { color: var(--blue); font-weight: 600; }

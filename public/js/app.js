@@ -49,6 +49,7 @@ async function renderAccountStatus() {
     canSearch = false;
     isPayingPlan = false;
     updateTopFilterLocks();
+    document.getElementById('notif-bell')?.classList.add('hidden');
     accountStatus.innerHTML = '<a href="/login.html">Se connecter</a>';
     return;
   }
@@ -86,7 +87,82 @@ async function renderAccountStatus() {
     else await enablePushNotifications(false);
     renderAccountStatus();
   });
+
+  document.getElementById('notif-bell')?.classList.remove('hidden');
+  refreshNotifications(); // remplit le badge tout de suite, sans ouvrir le panneau
 }
+
+// Boîte de notifications in-app (voir routes/notifications.js) — complète le push navigateur :
+// visible même sans notifications activées, ou si la notif push a été manquée/refusée.
+async function loadNotificationsData() {
+  try {
+    const res = await fetch('/api/notifications', { headers: authHeaders() });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    return null;
+  }
+}
+
+function updateNotifBadge(unreadCount) {
+  const badge = document.getElementById('notif-badge');
+  if (!badge) return;
+  badge.textContent = unreadCount > 9 ? '9+' : String(unreadCount);
+  badge.classList.toggle('hidden', unreadCount === 0);
+}
+
+function renderNotifList(data) {
+  const list = document.getElementById('notif-list');
+  if (!list) return;
+  if (!data.notifications.length) {
+    list.innerHTML = '<p class="notif-empty">Aucune notification pour le moment.</p>';
+    return;
+  }
+  list.innerHTML = data.notifications.map((n) => `
+    <a href="${escapeHtml(n.url || '/')}" class="notif-item ${n.read_at ? '' : 'unread'}" data-id="${n.id}">
+      <div class="notif-item-title">${escapeHtml(n.title)}</div>
+      ${n.body ? `<div class="notif-item-body">${escapeHtml(n.body)}</div>` : ''}
+      <div class="notif-item-time">${new Date(n.created_at).toLocaleString('fr-FR', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</div>
+    </a>`).join('');
+  list.querySelectorAll('.notif-item').forEach((el) => {
+    el.addEventListener('click', () => {
+      fetch(`/api/notifications/${el.dataset.id}/read`, { method: 'POST', headers: authHeaders() }).catch(() => {});
+    });
+  });
+}
+
+async function refreshNotifications() {
+  const data = await loadNotificationsData();
+  if (!data) return;
+  updateNotifBadge(data.unreadCount);
+  renderNotifList(data);
+}
+
+function closeNotifPanel() {
+  document.getElementById('notif-panel')?.classList.add('hidden');
+}
+
+document.getElementById('notif-bell')?.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  const panel = document.getElementById('notif-panel');
+  const wasHidden = panel.classList.contains('hidden');
+  closeNotifPanel();
+  if (wasHidden) {
+    panel.classList.remove('hidden');
+    refreshNotifications();
+  }
+});
+document.getElementById('notif-panel')?.addEventListener('click', (e) => e.stopPropagation());
+document.getElementById('notif-markall')?.addEventListener('click', async (e) => {
+  e.stopPropagation();
+  await fetch('/api/notifications/read-all', { method: 'POST', headers: authHeaders() }).catch(() => {});
+  refreshNotifications();
+});
+document.addEventListener('click', (e) => {
+  const wrap = document.getElementById('notif-wrap');
+  if (wrap && !wrap.contains(e.target)) closeNotifPanel();
+});
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNotifPanel(); });
 
 // Top 3 / Top 2 (les sélections les plus resserrées, donc les plus "vendables") réservés aux
 // abonnés payants — Top 10/Top 5/Tous restent accessibles à tous. Purement un filtre d'affichage
@@ -631,7 +707,13 @@ async function loadCombos(date) {
 }
 
 function comboMatchStatusBadge(m) {
-  if (!m.finished) return '<span class="combo-match-status pending">⏳ En attente</span>';
+  if (!m.finished) {
+    // Marché déjà mathématiquement acquis avant la fin du match (voir isOutcomeLockedIn côté
+    // serveur, ex. BTTS Oui dès que les deux ont marqué) — distinct du badge "Validé" final,
+    // qui lui implique que le match est réellement terminé.
+    if (m.validated === true) return '<span class="combo-match-status validated">✅ Déjà acquis (match en cours)</span>';
+    return '<span class="combo-match-status pending">⏳ En attente</span>';
+  }
   if (m.validated === true) return '<span class="combo-match-status validated">✅ Validé</span>';
   if (m.validated === false) return '<span class="combo-match-status failed">❌ Non validé</span>';
   return '<span class="combo-match-status pending">⚠️ Score non confirmé</span>';

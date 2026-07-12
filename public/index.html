@@ -15,6 +15,18 @@
       <h1 id="app-title">⚽ footpredictongoal</h1>
       <div class="api-status">
         <span id="api-badge" class="hidden">Chargement...</span>
+        <div class="notif-wrap" id="notif-wrap">
+          <button id="notif-bell" class="notif-bell hidden" type="button" aria-label="Notifications">
+            🔔<span id="notif-badge" class="notif-badge hidden">0</span>
+          </button>
+          <div id="notif-panel" class="notif-panel hidden">
+            <div class="notif-panel-header">
+              <span>Notifications</span>
+              <button id="notif-markall" type="button">Tout marquer lu</button>
+            </div>
+            <div id="notif-list"></div>
+          </div>
+        </div>
         <span id="account-status"></span>
       </div>
     </div>

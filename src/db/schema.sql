@@ -116,6 +116,22 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
 
 CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id);
 
+-- Boîte de notifications intégrée à l'app (complète le push navigateur, voir push_subscriptions
+-- ci-dessus) : une ligne par utilisateur destinataire, même sans abonnement push actif ou si la
+-- notif navigateur a été manquée — permet de les relire à l'ouverture de l'app et d'afficher un
+-- compteur de non lues (voir routes/notifications.js).
+CREATE TABLE IF NOT EXISTS notifications (
+  id         SERIAL PRIMARY KEY,
+  user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title      TEXT NOT NULL,
+  body       TEXT,
+  url        TEXT,
+  read_at    TIMESTAMPTZ,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, created_at DESC);
+
 -- Historique des pronostics vs résultats réels : sert à mesurer (par source, par niveau de
 -- confiance) si les poids de l'algo (form/classement/h2h/blessures) et le blend avec les
 -- sites externes sont réellement fiables, plutôt que de les ajuster à l'aveugle.

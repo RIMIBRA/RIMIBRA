@@ -1,5 +1,7 @@
 const webpush = require('web-push');
-const { getAllSubscriptions, removeSubscription } = require('../db/pushSubscriptions');
+const { getAllSubscriptionsGroupedByUser, removeSubscription } = require('../db/pushSubscriptions');
+const { createNotification } = require('../db/notifications');
+const { listUsersWithPlan } = require('../db/users');
 
 // Absentes en dev local tant que le .env n'est pas rempli -> mode no-op silencieux plutôt
 // qu'un crash au démarrage (web-push exige des clés valides pour setVapidDetails).
@@ -29,15 +31,24 @@ async function sendToSubscription(sub, payload) {
   }
 }
 
-// Diffuse une notification à TOUS les abonnés, gratuit compris (créer l'envie plutôt que de
-// notifier seulement ceux qui peuvent déjà tout voir) — buildPayload(sub) reçoit
-// { plan, isAdmin } par abonné pour adapter le contenu (typiquement l'url : vers le combiné si
-// déjà accessible, vers la page tarifs sinon). Jamais bloquant pour l'appelant
-// (création/résolution de combiné) : à appeler avec .catch(), pas await, depuis le code métier.
-async function broadcastPush(buildPayload) {
-  if (!configured) return;
-  const subs = await getAllSubscriptions();
-  await Promise.all(subs.map((sub) => sendToSubscription(sub, buildPayload(sub))));
+// Notifie TOUS les utilisateurs, gratuit compris (créer l'envie plutôt que de notifier
+// seulement ceux qui peuvent déjà tout voir) — buildPayload(user) reçoit
+// { id, email, is_admin, plan } par utilisateur pour adapter le contenu (typiquement l'url :
+// vers le combiné si déjà accessible, vers la page tarifs sinon). Chaque utilisateur reçoit une
+// entrée dans sa boîte de notifications in-app (voir db/notifications.js), qu'il ait ou non un
+// abonnement push actif — celui-ci ne sert qu'à le pousser en plus, immédiatement, si possible.
+// Jamais bloquant pour l'appelant (création/résolution de combiné) : à appeler avec .catch(),
+// pas await, depuis le code métier.
+async function notifyAllUsers(buildPayload) {
+  const [users, subsByUser] = await Promise.all([listUsersWithPlan(), getAllSubscriptionsGroupedByUser()]);
+
+  await Promise.all(users.map(async (user) => {
+    const payload = buildPayload(user);
+    await createNotification(user.id, payload).catch((err) => console.error('Notification in-app (ignorée):', err.message));
+    if (!configured) return;
+    const subs = subsByUser.get(user.id) || [];
+    await Promise.all(subs.map((sub) => sendToSubscription(sub, payload)));
+  }));
 }
 
-module.exports = { broadcastPush, configured };
+module.exports = { notifyAllUsers, configured };
