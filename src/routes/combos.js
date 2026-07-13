@@ -247,16 +247,25 @@ function buildComboMatches(predictions, usedIds, leagueIds, rankFn = pickProbabi
   return { matches, combinedProbability, risk };
 }
 
-// Liste les matchs du jour utilisables dans un combiné manuel (voir createManualCombo) —
+// Liste les matchs utilisables dans un combiné manuel (voir createManualCombo) —
 // TOUS les matchs analysés avec des probabilités, sans le filtre de ligues automatique :
 // le fondateur choisit librement depuis le dashboard admin. query (optionnel) bascule sur la
 // recherche à la demande de chaque sport (searchFixtures/searchGames) au lieu de la sélection
 // automatique du jour (plafonnée à MAX_FIXTURES_PER_DAY, ex. 30 pour le foot) — retrouve un
 // match précis même hors de cette sélection, comme la recherche publique de l'app.
-async function listComboCandidates(sportKey, date, query) {
+// spanDays (optionnel, défaut 1) : couvre N jours consécutifs à partir de date — permet de
+// choisir un match demain ou après-demain dans un combiné créé aujourd'hui.
+async function listComboCandidates(sportKey, date, query, spanDays = 1) {
   const sport = SPORTS.find((s) => s.key === sportKey);
   if (!sport) throw new Error(`Sport inconnu : ${sportKey}`);
-  const { results } = query ? await sport.search(date, query) : await sport.analyzeDay(date);
+  let results;
+  if (query) {
+    ({ results } = await sport.search(date, query));
+  } else if (spanDays > 1) {
+    results = await analyzeDaysForSport(sport, date, Math.min(spanDays, 7));
+  } else {
+    ({ results } = await sport.analyzeDay(date));
+  }
   const candidates = results.filter((p) => !p.error && !p.insufficientData && p.matchState !== 'finished' && p.probabilities);
 
   // Cotes réelles "nombre de sets" (tennis uniquement, voir resolveSetsMarket) — un appel par
@@ -265,6 +274,7 @@ async function listComboCandidates(sportKey, date, query) {
   // envers l'API externe.
   const withMarkets = await mapWithConcurrency(candidates, 10, async (p) => ({
     fixtureId: p.fixture.id,
+    date: p.fixture.date,
     home: p.fixture.home,
     away: p.fixture.away,
     league: p.fixture.league,

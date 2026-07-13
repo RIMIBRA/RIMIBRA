@@ -203,6 +203,12 @@ function renderManualComboSection() {
           ${sportOptions}
         </select>
         <input type="date" id="combo-date" value="${today}" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0.35rem 0.6rem">
+        <select id="combo-span-days" title="Nombre de jours à couvrir à partir de la date choisie" style="background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0.35rem 0.6rem">
+          <option value="1">1 jour</option>
+          <option value="2" selected>2 jours</option>
+          <option value="3">3 jours</option>
+          <option value="7">7 jours</option>
+        </select>
         <button id="combo-load-btn" class="filter-btn">Charger les matchs</button>
       </div>
       <input type="text" id="combo-team-search" placeholder="🔎 Rechercher une équipe ou un joueur…" style="width:100%;max-width:320px;margin-bottom:0.6rem;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:0.35rem 0.6rem">
@@ -479,14 +485,16 @@ function renderComboCandidatesTable(list, sport) {
   }
   container.innerHTML = `
     <table class="admin-table combo-candidates-table">
-      <thead><tr><th></th><th>Ligue</th><th>Match</th><th>Marché (pronostic)</th></tr></thead>
+      <thead><tr><th></th><th>Date</th><th>Ligue</th><th>Match</th><th>Marché (pronostic)</th></tr></thead>
       <tbody>
         ${list.map((c) => {
           const existing = comboSelection.find((s) => s.sport === sport && String(s.fixtureId) === String(c.fixtureId));
           const betType = existing?.betType || 'algo';
+          const dateStr = c.date ? new Date(c.date).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' }) : '';
           return `
           <tr class="combo-candidate-row" style="cursor:pointer" data-fixture-id="${c.fixtureId}" title="Cliquer pour voir le détail du match">
             <td><input type="checkbox" class="combo-candidate-cb" ${existing ? 'checked' : ''} data-fixture-id="${c.fixtureId}"></td>
+            <td style="white-space:nowrap;color:var(--muted);font-size:0.85rem">${escapeHtml(dateStr)}</td>
             <td>${escapeHtml(c.league || '')}</td>
             <td>${escapeHtml(c.home)} — ${escapeHtml(c.away)}</td>
             <td>${buildMarketPickerHtml(c, betType)}</td>
@@ -562,12 +570,13 @@ function filterComboCandidates() {
 async function searchComboCandidatesRemote() {
   const sport = document.getElementById('combo-sport').value;
   const date = document.getElementById('combo-date').value;
+  const spanDays = document.getElementById('combo-span-days')?.value || '1';
   const rawQuery = (document.getElementById('combo-team-search')?.value || '').trim();
   if (!rawQuery) return;
   const container = document.getElementById('combo-candidates');
   container.innerHTML = '<p style="color:var(--muted)">Recherche en cours… (analyse à la demande, hors sélection automatique)</p>';
   try {
-    const res = await fetch(`/api/admin/combo-candidates?sport=${sport}&date=${date}&q=${encodeURIComponent(rawQuery)}`, { headers: authHeaders() });
+    const res = await fetch(`/api/admin/combo-candidates?sport=${sport}&date=${date}&spanDays=${spanDays}&q=${encodeURIComponent(rawQuery)}`, { headers: authHeaders() });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Recherche impossible');
     if (!data.candidates.length) {
@@ -589,12 +598,14 @@ async function searchComboCandidatesRemote() {
 async function loadComboCandidates() {
   const sport = document.getElementById('combo-sport').value;
   const date = document.getElementById('combo-date').value;
+  const spanDays = document.getElementById('combo-span-days')?.value || '1';
   const container = document.getElementById('combo-candidates');
   const searchInput = document.getElementById('combo-team-search');
   if (searchInput) searchInput.value = ''; // nouveau chargement -> on repart d'une recherche vide
-  container.innerHTML = '<p style="color:var(--muted)">Analyse des matchs en cours… (peut prendre une minute sur un cache froid)</p>';
+  const spanLabel = spanDays > 1 ? ` sur ${spanDays} jours` : '';
+  container.innerHTML = `<p style="color:var(--muted)">Analyse des matchs en cours${spanLabel}… (peut prendre une minute sur un cache froid)</p>`;
   try {
-    const res = await fetch(`/api/admin/combo-candidates?sport=${sport}&date=${date}`, { headers: authHeaders() });
+    const res = await fetch(`/api/admin/combo-candidates?sport=${sport}&date=${date}&spanDays=${spanDays}`, { headers: authHeaders() });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Chargement impossible');
     if (!data.candidates.length) {
