@@ -1,4 +1,4 @@
-const { pickProbability, isComboCandidate, buildComboMatches, summarize, addDays, hasMediaCoverage, footballComboRank, buildMultiComboMatches, COMBO_MAX_MATCHES } = require('./combos');
+const { pickProbability, isComboCandidate, buildComboMatches, summarize, addDays, hasMediaCoverage, footballComboRank, buildMultiComboMatches, MULTI_AUTO_MAX_MATCHES } = require('./combos');
 
 function fakePrediction({
   id, pick, home = 60, draw = 20, away = 20, finished = false, error = false, insufficientData = false,
@@ -238,10 +238,10 @@ describe('buildMultiComboMatches', () => {
     expect(result.combinedProbability).toBeGreaterThanOrEqual(50);
   });
 
-  test(`never exceeds ${COMBO_MAX_MATCHES} matches even when more would stay above 50%`, () => {
+  test(`never exceeds ${MULTI_AUTO_MAX_MATCHES} matches even when more would stay above 50%`, () => {
     const candidates = [1, 2, 3, 4, 5, 6, 7].map((i) => fakeCandidate(i, 'football', 99));
     const result = buildMultiComboMatches(candidates);
-    expect(result.matches).toHaveLength(COMBO_MAX_MATCHES);
+    expect(result.matches).toHaveLength(MULTI_AUTO_MAX_MATCHES);
   });
 });
 

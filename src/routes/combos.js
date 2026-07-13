@@ -305,22 +305,18 @@ async function listComboCandidates(sportKey, date, query, spanDays = 1) {
 // alors son propre champ `sport` (voir enrichMatchStatus pour la résolution des résultats).
 const MULTI_LABEL = '🌍 Multi-sports';
 const SPECIAL_LABEL = '🌟 Spécial';
-const COMBO_MAX_MATCHES = 5;
 
 // Combiné créé manuellement par le fondateur (dashboard admin) — contourne volontairement le
 // filtre de ligues ET la barre des 50% des combinés automatiques : un choix humain explicite
-// prime sur les règles. selections: [{ sport, fixtureId, betType }], 2 à 5 matchs, éventuellement
-// de sports différents (combiné enregistré sous 'multi' dans ce cas). betType (optionnel, par
-// match) choisit le marché ciblé — 1/X/2, BTTS/total de buts (foot), nombre de sets (tennis),
-// voir resolveBetSelection ; absent -> pick recommandé par l'algo, comme avant.
+// prime sur les règles. selections: [{ sport, fixtureId, betType }], au moins 2 matchs,
+// éventuellement de sports différents (combiné enregistré sous 'multi' dans ce cas).
+// betType (optionnel, par match) choisit le marché ciblé — 1/X/2, BTTS/total de buts (foot),
+// nombre de sets (tennis), voir resolveBetSelection ; absent -> pick recommandé par l'algo.
 // options.special marque le combiné pour la section
 // "Spécial" (voir getSpecialComboSeries) au lieu de son onglet sport/multi habituel.
 async function createManualCombo(date, selections, options = {}) {
   if (!Array.isArray(selections) || selections.length < 2) {
     throw new Error('Au moins 2 matchs sont requis pour un combiné');
-  }
-  if (selections.length > COMBO_MAX_MATCHES) {
-    throw new Error(`Maximum ${COMBO_MAX_MATCHES} matchs par combiné`);
   }
 
   const sportKeys = [...new Set(selections.map((s) => s.sport))];
@@ -406,6 +402,8 @@ async function collectMultiSportCandidates(date, usedIds) {
   return perSport.flat().sort((a, b) => b.prob - a.prob);
 }
 
+const MULTI_AUTO_MAX_MATCHES = 5; // limite uniquement pour le combiné multi automatique
+
 // Combiné multi-sports automatique : les meilleurs matchs toutes disciplines confondues, de 2
 // jusqu'à 5, en ajoutant tant que la probabilité combinée reste au-dessus de la barre des 50%
 // (même seuil qualité que les combinés classiques — voir buildComboMatches).
@@ -415,7 +413,7 @@ function buildMultiComboMatches(candidates) {
   const chosen = [];
   let combined = 1;
   for (const c of candidates) {
-    if (chosen.length >= COMBO_MAX_MATCHES) break;
+    if (chosen.length >= MULTI_AUTO_MAX_MATCHES) break;
     const next = combined * (c.prob / 100);
     if (chosen.length < 2) {
       chosen.push(c);
@@ -881,7 +879,7 @@ module.exports.SPORTS = SPORTS;
 module.exports.listComboCandidates = listComboCandidates;
 module.exports.createManualCombo = createManualCombo;
 module.exports.buildMultiComboMatches = buildMultiComboMatches;
-module.exports.COMBO_MAX_MATCHES = COMBO_MAX_MATCHES;
+module.exports.MULTI_AUTO_MAX_MATCHES = MULTI_AUTO_MAX_MATCHES;
 module.exports.MULTI_LABEL = MULTI_LABEL;
 module.exports.SPECIAL_LABEL = SPECIAL_LABEL;
 module.exports.resolveBetSelection = resolveBetSelection;
