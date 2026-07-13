@@ -380,12 +380,13 @@ async function createManualCombo(date, selections, options = {}) {
 // Rassemble les candidats de TOUS les sports pour le combiné multi automatique — mêmes règles
 // par sport que les combinés classiques (dont le filtre de compétitions du foot) ; un sport en
 // échec (quota épuisé, réseau) est simplement ignoré plutôt que de bloquer les autres.
+// Couvre COMBO_SPAN_DAYS jours comme les combinés mono-sport (matchs de demain inclus si > 1).
 async function collectMultiSportCandidates(date, usedIds) {
   const perSport = await Promise.all(SPORTS.map(async (sport) => {
     try {
-      const { results } = await sport.analyzeDay(date);
+      const allResults = await analyzeDaysForSport(sport, date, COMBO_SPAN_DAYS);
       const leagueFilter = sport.key === 'football' ? FOOTBALL_COMBO_LEAGUE_IDS : undefined;
-      return results
+      return allResults
         .filter((p) => isComboCandidate(p, usedIds, leagueFilter))
         .map((p) => ({ p, sportKey: sport.key, prob: pickProbability(p) }));
     } catch {
@@ -610,6 +611,25 @@ function summarize(matches) {
   return { validatedCount, finishedCount: matches.filter((m) => m.finished).length, totalCount: matches.length, status };
 }
 
+// Nombre de jours consécutifs couverts par chaque combiné automatique (aujourd'hui inclus).
+// COMBO_SPAN_DAYS=1 = comportement original (un seul jour), 2 = aujourd'hui + demain, etc.
+const COMBO_SPAN_DAYS = Math.max(1, Math.min(7, parseInt(process.env.COMBO_SPAN_DAYS || '2', 10)));
+
+// Renvoie les résultats fusionnés de analyzeDay sur les spanDays jours à partir de baseDate.
+// Un jour en échec (quota épuisé, réseau) est simplement ignoré plutôt que de bloquer les autres.
+async function analyzeDaysForSport(sport, baseDate, spanDays) {
+  const dates = Array.from({ length: spanDays }, (_, i) => addDays(baseDate, i));
+  const perDay = await Promise.all(dates.map(async (d) => {
+    try {
+      const { results } = await sport.analyzeDay(d);
+      return results;
+    } catch {
+      return [];
+    }
+  }));
+  return perDay.flat();
+}
+
 // Renvoie tous les combinés du jour pour ce sport (historique + actif), en générant un
 // nouveau combiné seulement si le précédent est résolu (gagné ou perdu) — jamais pendant
 // qu'un combiné est encore en cours.
@@ -632,10 +652,10 @@ async function getOrCreateComboSeries(sport, date) {
 
   if (needsNewCombo) {
     const usedIds = new Set(stored.flatMap((row) => row.matches.map((m) => String(m.fixtureId))));
-    const { results } = await sport.analyzeDay(date);
+    const allResults = await analyzeDaysForSport(sport, date, COMBO_SPAN_DAYS);
     const leagueFilter = sport.key === 'football' ? FOOTBALL_COMBO_LEAGUE_IDS : undefined;
     const rankFn = sport.key === 'football' ? footballComboRank : undefined;
-    const built = buildComboMatches(results, usedIds, leagueFilter, rankFn);
+    const built = buildComboMatches(allResults, usedIds, leagueFilter, rankFn);
     if (built) {
       await saveCombo(date, sport.key, sport.label, built.matches, built.combinedProbability, built.risk);
       const matches = built.matches.map((m) => ({ ...m, finished: false, validated: null }));
