@@ -25,7 +25,32 @@ const PORT = process.env.PORT || 3001;
 // confiance à exactement un saut de proxy, ce qui correspond à l'infra de Render.
 app.set('trust proxy', 1);
 
-app.use(helmet({ contentSecurityPolicy: false })); // CSP désactivée pour l'instant (scripts inline absents mais à revoir si on en ajoute)
+// CSP : filet de sécurité pour toute injection HTML qui passerait malgré l'échappement côté
+// client (voir escapeHtml dans app.js/admin.js/matchModal.js) — même si une balise <script>
+// s'infiltre dans le DOM (ex: nom d'équipe mal échappé), le navigateur refuse de l'exécuter.
+// styleSrc autorise 'unsafe-inline' : les templates JS posent des style="" inline partout
+// (couleurs, largeurs de barres calculées) — un vrai retrait demanderait de tout migrer vers
+// des classes CSS, hors scope ici. imgSrc autorise https: pour les logos d'équipe (servis par
+// l'API foot, media.api-sports.io) et data: pour le favicon SVG inline des pages HTML.
+// scriptSrcAttr autorise 'unsafe-inline' uniquement pour les attributs onerror="" déjà présents
+// (fallback d'image cassée, ex: this.style.display='none') : ils sont écrits en dur par l'app,
+// jamais construits à partir de données externes (src/alt sont échappés séparément) -> pas de
+// vecteur d'injection rouvert. scriptSrc (les balises <script> elles-mêmes) reste strict.
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      scriptSrcAttr: ["'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", 'data:', 'https:'],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      baseUri: ["'self'"],
+    },
+  },
+}));
 // req.rawBody : Buffer exact du corps reçu, nécessaire pour vérifier la signature HMAC des
 // webhooks GeniusPay (voir routes/payments.js) — un objet JSON re-sérialisé pourrait différer
 // octet à octet de ce que GeniusPay a réellement signé (ordre des clés, espacement...).
@@ -33,10 +58,14 @@ app.use(express.json({ limit: '100kb', verify: (req, res, buf) => { req.rawBody 
 app.use(express.static(path.join(__dirname, '../public')));
 app.use(attachUser); // remplit req.user (null si pas de token / token invalide -> traité comme 'free')
 
-// Anti brute-force sur les routes sensibles (login/register) : 10 tentatives / 15 min / IP
+// Anti brute-force sur les routes sensibles (login/register/reset) : 10 tentatives / 15 min / IP
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, max: 10, standardHeaders: true, legacyHeaders: false });
 app.use('/api/auth/login', authLimiter);
 app.use('/api/auth/register', authLimiter);
+// Même limiteur pour forgot/reset-password : sans ça, /forgot-password permettrait de spammer
+// n'importe quelle boîte mail, et /reset-password de bruteforcer un token à l'aveugle.
+app.use('/api/auth/forgot-password', authLimiter);
+app.use('/api/auth/reset-password', authLimiter);
 
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/admin', require('./routes/admin'));
@@ -49,17 +78,26 @@ const analyticsLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeade
 app.use('/api/analytics', analyticsLimiter);
 app.use('/api/analytics', require('./routes/analytics'));
 
+// Routes coûteuses (API foot payante à quota journalier + scrapers Puppeteer derrière) : sans
+// limite, un script qui matraque /today ou /combos peut épuiser le quota API du jour (plus
+// aucune donnée fraîche pour personne) ou saturer le navigateur Puppeteer partagé. Généreux
+// pour un visiteur normal (quelques rechargements de page), bloquant pour un abus automatisé.
+const predictionsLimiter = rateLimit({ windowMs: 60 * 1000, max: 30, standardHeaders: true, legacyHeaders: false });
+// Push/notifications : moins coûteux (pas d'appel API externe) mais toujours exposé sans auth
+// pour certaines routes (voir routes/push.js) -> une limite plus large reste utile en filet.
+const apiLimiter = rateLimit({ windowMs: 60 * 1000, max: 60, standardHeaders: true, legacyHeaders: false });
+
 // Foot reste accessible en plan gratuit ; les autres sports nécessitent premium ou plus
-app.use('/api/predictions', require('./routes/predictions'));
-app.use('/api/nfl/predictions', requireSportAccess('nfl'), require('./routes/nflPredictions'));
-app.use('/api/nba/predictions', requireSportAccess('nba'), require('./routes/nbaPredictions'));
-app.use('/api/hockey/predictions', requireSportAccess('hockey'), require('./routes/hockeyPredictions'));
-app.use('/api/baseball/predictions', requireSportAccess('baseball'), require('./routes/baseballPredictions'));
-app.use('/api/handball/predictions', requireSportAccess('handball'), require('./routes/handballPredictions'));
-app.use('/api/tennis/predictions', requireSportAccess('tennis'), require('./routes/tennisPredictions'));
-app.use('/api/combos', require('./routes/combos'));
-app.use('/api/push', require('./routes/push'));
-app.use('/api/notifications', require('./routes/notifications'));
+app.use('/api/predictions', predictionsLimiter, require('./routes/predictions'));
+app.use('/api/nfl/predictions', predictionsLimiter, requireSportAccess('nfl'), require('./routes/nflPredictions'));
+app.use('/api/nba/predictions', predictionsLimiter, requireSportAccess('nba'), require('./routes/nbaPredictions'));
+app.use('/api/hockey/predictions', predictionsLimiter, requireSportAccess('hockey'), require('./routes/hockeyPredictions'));
+app.use('/api/baseball/predictions', predictionsLimiter, requireSportAccess('baseball'), require('./routes/baseballPredictions'));
+app.use('/api/handball/predictions', predictionsLimiter, requireSportAccess('handball'), require('./routes/handballPredictions'));
+app.use('/api/tennis/predictions', predictionsLimiter, requireSportAccess('tennis'), require('./routes/tennisPredictions'));
+app.use('/api/combos', predictionsLimiter, require('./routes/combos'));
+app.use('/api/push', apiLimiter, require('./routes/push'));
+app.use('/api/notifications', apiLimiter, require('./routes/notifications'));
 
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));

@@ -69,6 +69,21 @@ describe('computeValidation', () => {
     const result = computeValidation('1 (Domicile)', 1, 0, { btts: 70, over25: 70 });
     expect(result.over25.correct).toBe(false); // 1 but de moins de 2,5 alors que +2,5 était prédit
   });
+
+  test('grades on the 90-minute score, not the after-extra-time score', () => {
+    // Score à 90 min: 1-0 (domicile gagnant) ; le score final 2-3 n'arrive qu'en prolongation.
+    const result = computeValidation('1 (Domicile)', 1, 0, null, { home: 2, away: 3 });
+    expect(result.actualPick).toBe('1 (Domicile)');
+    expect(result.correct).toBe(true);
+    expect(result.actualScore).toEqual({ home: 2, away: 3 }); // score final affiché tel quel
+    expect(result.scoreAt90).toEqual({ home: 1, away: 0 });
+    expect(result.wentToExtraTime).toBe(true);
+  });
+
+  test('wentToExtraTime is false when the final score matches the 90-minute score', () => {
+    const result = computeValidation('1 (Domicile)', 2, 0, null, { home: 2, away: 0 });
+    expect(result.wentToExtraTime).toBe(false);
+  });
 });
 
 describe('isLikelyMinor', () => {

@@ -35,7 +35,7 @@ async function openTrackedMatchModal(sport, fixtureId) {
     if (!res.ok) throw new Error(data.error || 'Analyse impossible');
     modalContent.innerHTML = data.matchState === 'finished' ? buildValidationContent(data) : buildModalContent(data);
   } catch (err) {
-    modalContent.innerHTML = `<p style="color:var(--red)">Erreur : ${err.message}</p>`;
+    modalContent.innerHTML = `<p style="color:var(--red)">Erreur : ${escapeHtml(err.message)}</p>`;
   }
 }
 

@@ -218,16 +218,24 @@ function probClass(v) {
 // partagées avec le dashboard admin.
 
 function buildCard(p) {
+  // Noms d'équipe/ligue/logos : viennent de l'API foot / des scrapers externes, jamais de
+  // confiance avant affichage HTML (même règle que pour l'email utilisateur plus haut).
+  const home = escapeHtml(p.fixture.home);
+  const away = escapeHtml(p.fixture.away);
+  const league = escapeHtml(p.fixture.league);
+  const homeLogo = p.fixture.homeLogo ? escapeHtml(p.fixture.homeLogo) : '';
+  const awayLogo = p.fixture.awayLogo ? escapeHtml(p.fixture.awayLogo) : '';
+
   if (p.error) {
     return `
       <div class="card has-error">
-        <div class="card-league">${p.fixture.league}</div>
+        <div class="card-league">${league}</div>
         <div class="card-teams">
-          <div class="team"><div class="team-name">${p.fixture.home}</div></div>
+          <div class="team"><div class="team-name">${home}</div></div>
           <div class="vs">vs</div>
-          <div class="team"><div class="team-name">${p.fixture.away}</div></div>
+          <div class="team"><div class="team-name">${away}</div></div>
         </div>
-        <div style="font-size:0.78rem;color:var(--red)">Erreur: ${p.error}</div>
+        <div style="font-size:0.78rem;color:var(--red)">Erreur: ${escapeHtml(p.error)}</div>
       </div>`;
   }
 
@@ -251,16 +259,16 @@ function buildCard(p) {
   if (p.insufficientData) {
     return `
       <div class="card has-error" data-id="${p.fixture.id}">
-        <div class="card-league">${p.fixture.league} · ${time} ${webBadges}${modeBadge}</div>
+        <div class="card-league">${league} · ${time} ${webBadges}${modeBadge}</div>
         <div class="card-teams">
           <div class="team">
-            ${p.fixture.homeLogo ? `<img src="${p.fixture.homeLogo}" alt="${p.fixture.home}" onerror="this.style.display='none'">` : ''}
-            <div class="team-name">${p.fixture.home}</div>
+            ${homeLogo ? `<img src="${homeLogo}" alt="${home}" onerror="this.style.display='none'">` : ''}
+            <div class="team-name">${home}</div>
           </div>
           <div class="vs">vs</div>
           <div class="team">
-            ${p.fixture.awayLogo ? `<img src="${p.fixture.awayLogo}" alt="${p.fixture.away}" onerror="this.style.display='none'">` : ''}
-            <div class="team-name">${p.fixture.away}</div>
+            ${awayLogo ? `<img src="${awayLogo}" alt="${away}" onerror="this.style.display='none'">` : ''}
+            <div class="team-name">${away}</div>
           </div>
         </div>
         <div style="font-size:0.78rem;color:var(--muted);text-align:center;padding:0.4rem 0">
@@ -273,16 +281,16 @@ function buildCard(p) {
 
   return `
     <div class="card ${confClass}" data-id="${p.fixture.id}">
-      <div class="card-league">${p.fixture.league} · ${time} ${webBadges}${modeBadge}${noDataBadge}</div>
+      <div class="card-league">${league} · ${time} ${webBadges}${modeBadge}${noDataBadge}</div>
       <div class="card-teams">
         <div class="team">
-          ${p.fixture.homeLogo ? `<img src="${p.fixture.homeLogo}" alt="${p.fixture.home}" onerror="this.style.display='none'">` : ''}
-          <div class="team-name">${p.fixture.home}</div>
+          ${homeLogo ? `<img src="${homeLogo}" alt="${home}" onerror="this.style.display='none'">` : ''}
+          <div class="team-name">${home}</div>
         </div>
         <div class="vs">vs</div>
         <div class="team">
-          ${p.fixture.awayLogo ? `<img src="${p.fixture.awayLogo}" alt="${p.fixture.away}" onerror="this.style.display='none'">` : ''}
-          <div class="team-name">${p.fixture.away}</div>
+          ${awayLogo ? `<img src="${awayLogo}" alt="${away}" onerror="this.style.display='none'">` : ''}
+          <div class="team-name">${away}</div>
         </div>
       </div>
       <div class="card-probs">
@@ -474,7 +482,7 @@ function attachFinishedCardClickHandlers(container, predictions) {
         if (!res.ok) throw new Error(data.error || 'Analyse impossible');
         modalContent.innerHTML = buildValidationContent(data);
       } catch (err) {
-        modalContent.innerHTML = `<p style="color:var(--red)">Erreur : ${err.message}</p>`;
+        modalContent.innerHTML = `<p style="color:var(--red)">Erreur : ${escapeHtml(err.message)}</p>`;
       }
     });
   });
@@ -486,18 +494,24 @@ function buildFinishedCard(p) {
   const hasScore = p.finalScore && p.finalScore.home != null && p.finalScore.away != null;
   const homeWon = hasScore && p.finalScore.home > p.finalScore.away;
   const awayWon = hasScore && p.finalScore.away > p.finalScore.home;
+  // Noms d'équipe/ligue/logos : viennent de l'API foot, jamais de confiance avant affichage HTML.
+  const home = escapeHtml(p.fixture.home);
+  const away = escapeHtml(p.fixture.away);
+  const league = escapeHtml(p.fixture.league);
+  const homeLogo = p.fixture.homeLogo ? escapeHtml(p.fixture.homeLogo) : '';
+  const awayLogo = p.fixture.awayLogo ? escapeHtml(p.fixture.awayLogo) : '';
   return `
     <div class="finished-card" data-id="${p.fixture.id}">
-      <div class="card-league">${p.fixture.league}</div>
+      <div class="card-league">${league}</div>
       <div class="card-teams">
         <div class="team">
-          ${p.fixture.homeLogo ? `<img src="${p.fixture.homeLogo}" alt="${p.fixture.home}" onerror="this.style.display='none'">` : ''}
-          <div class="team-name" style="${homeWon ? 'font-weight:700' : ''}">${p.fixture.home}</div>
+          ${homeLogo ? `<img src="${homeLogo}" alt="${home}" onerror="this.style.display='none'">` : ''}
+          <div class="team-name" style="${homeWon ? 'font-weight:700' : ''}">${home}</div>
         </div>
         <div class="vs">${hasScore ? `${p.finalScore.home} : ${p.finalScore.away}` : '—'}</div>
         <div class="team">
-          ${p.fixture.awayLogo ? `<img src="${p.fixture.awayLogo}" alt="${p.fixture.away}" onerror="this.style.display='none'">` : ''}
-          <div class="team-name" style="${awayWon ? 'font-weight:700' : ''}">${p.fixture.away}</div>
+          ${awayLogo ? `<img src="${awayLogo}" alt="${away}" onerror="this.style.display='none'">` : ''}
+          <div class="team-name" style="${awayWon ? 'font-weight:700' : ''}">${away}</div>
         </div>
       </div>
       <div style="font-size:0.75rem;color:var(--muted);text-align:center">${hasScore ? 'Match terminé · cliquer pour voir la validation' : '⚠️ Match probablement terminé — score non confirmé par le fournisseur'}</div>
@@ -727,10 +741,12 @@ function buildComboMatch(m, sportKey) {
   // retombe sur le sport du groupe, comme pour les combinés mono-sport classiques.
   const matchSport = m.sport || sportKey;
   const sportBadge = m.sport ? `${SPORT_EMOJI[m.sport] || ''} ` : '';
+  // Noms d'équipe/ligue : viennent de l'API foot / des scrapers externes, jamais de confiance
+  // avant affichage HTML.
   return `
     <div class="combo-match ${m.finished ? (m.validated ? 'is-validated' : 'is-failed') : ''}" data-id="${m.fixture.id}" data-sport="${matchSport}">
-      <div class="combo-match-league">${sportBadge}${m.fixture.league} · ${time}</div>
-      <div class="combo-match-teams">${m.fixture.home} vs ${m.fixture.away}</div>
+      <div class="combo-match-league">${sportBadge}${escapeHtml(m.fixture.league)} · ${time}</div>
+      <div class="combo-match-teams">${escapeHtml(m.fixture.home)} vs ${escapeHtml(m.fixture.away)}</div>
       <div class="combo-match-pick">✓ ${m.pick} <span class="combo-match-prob">${m.probability}%</span></div>
       ${comboMatchStatusBadge(m)}
     </div>`;
@@ -815,7 +831,7 @@ function attachComboMatchClickHandlers(container) {
         if (!res.ok) throw new Error(data.error || 'Analyse impossible');
         modalContent.innerHTML = finished ? buildValidationContent(data) : buildModalContent(data);
       } catch (err) {
-        modalContent.innerHTML = `<p style="color:var(--red)">Erreur : ${err.message}</p>`;
+        modalContent.innerHTML = `<p style="color:var(--red)">Erreur : ${escapeHtml(err.message)}</p>`;
       }
     });
   });
