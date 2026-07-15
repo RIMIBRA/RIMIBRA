@@ -236,3 +236,18 @@ CREATE TABLE IF NOT EXISTS partner_clicks (
 );
 
 CREATE INDEX IF NOT EXISTS idx_partner_clicks_created_at ON partner_clicks(created_at);
+
+-- Mot de passe oublié (voir db/passwordResets.js) : on stocke le hash SHA-256 du token, jamais
+-- le token en clair -> une fuite de la table ne permet pas de rejouer un lien de réinitialisation
+-- (même principe que password_hash pour les mots de passe). used_at distingue un lien déjà
+-- consommé d'un lien simplement expiré, pour un message d'erreur plus précis côté utilisateur.
+CREATE TABLE IF NOT EXISTS password_reset_tokens (
+  id          SERIAL PRIMARY KEY,
+  user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token_hash  TEXT NOT NULL UNIQUE,
+  expires_at  TIMESTAMPTZ NOT NULL,
+  used_at     TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_reset_tokens_user ON password_reset_tokens(user_id);

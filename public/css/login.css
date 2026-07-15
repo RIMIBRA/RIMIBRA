@@ -78,6 +78,13 @@
   text-align: center;
 }
 
+.auth-success {
+  color: var(--green);
+  font-size: 0.82rem;
+  margin-top: 0.75rem;
+  text-align: center;
+}
+
 .auth-skip {
   display: block;
   text-align: center;

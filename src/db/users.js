@@ -29,6 +29,12 @@ async function findUserById(id) {
   return rows[0] || null;
 }
 
+// Réinitialisation de mot de passe (voir routes/auth.js /reset-password) — remplace le hash
+// existant, aucune autre condition (le token déjà consommé par l'appelant fait foi).
+async function updatePassword(userId, passwordHash) {
+  await pool.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, userId]);
+}
+
 // Abonnement le plus récent et encore valide (non expiré, non annulé) — sinon 'free' par défaut
 async function getActivePlan(userId) {
   const { rows } = await pool.query(
@@ -85,4 +91,5 @@ module.exports = {
   setPlan,
   listUsersWithPlan,
   touchLastLogin,
+  updatePassword,
 };
