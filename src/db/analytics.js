@@ -4,9 +4,13 @@ const pool = require('./pool');
 // IP + user-agent + jour + secret serveur -> jamais l'IP en clair stockée, mais un même
 // visiteur produit le même hash sur une même journée, ce qui permet d'approximer les
 // visiteurs uniques (compte de hashs distincts) sans cookie ni service tiers.
+// Sel dédié : ANALYTICS_HASH_SALT si défini, sinon repli sur JWT_SECRET (comportement
+// historique, pour ne rien casser tant que la variable n'est pas ajoutée en prod) — évite de
+// coupler une feature analytics sans rapport à la sécurité du secret d'authentification.
 function visitorHash(ip, userAgent) {
   const day = new Date().toISOString().split('T')[0];
-  return crypto.createHash('sha256').update(`${ip}|${userAgent}|${day}|${process.env.JWT_SECRET}`).digest('hex');
+  const salt = process.env.ANALYTICS_HASH_SALT || process.env.JWT_SECRET;
+  return crypto.createHash('sha256').update(`${ip}|${userAgent}|${day}|${salt}`).digest('hex');
 }
 
 async function recordPageView(path, ip, userAgent) {

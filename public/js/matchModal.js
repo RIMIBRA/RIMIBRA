@@ -10,12 +10,16 @@
 // Si le marché juge l'issue la plus probable trop évidente (cote très basse, voir
 // alternativeBet côté backend), l'alternative devient directement la recommandation
 // principale affichée — plus la peine de l'annoncer pour la reléguer aussitôt en dessous.
+// Noms d'équipe/ligue : viennent de l'API foot / des scrapers externes, jamais de confiance
+// avant affichage HTML (voir escapeHtml dans app.js/admin.js, chargés avant ce fichier).
 function buildBetAdvice(p) {
-  const { home, draw, away } = p.probabilities;
-  const max = Math.max(home, draw, away);
+  const home = escapeHtml(p.fixture.home);
+  const away = escapeHtml(p.fixture.away);
+  const { home: homeProb, draw, away: awayProb } = p.probabilities;
+  const max = Math.max(homeProb, draw, awayProb);
 
   if (p.alternativeBet) {
-    const obvious = home === max ? p.fixture.home : away === max ? p.fixture.away : 'Match nul';
+    const obvious = homeProb === max ? home : awayProb === max ? away : 'Match nul';
     return {
       short: p.alternativeBet.alternative.market,
       detail: `"${obvious}" jugé trop évident par le marché (cote ~${p.alternativeBet.mainPickOdd}) — alternative plus équilibrée, cote moyenne ${p.alternativeBet.alternative.odd}.`,
@@ -23,16 +27,16 @@ function buildBetAdvice(p) {
   }
 
   if (max >= 50) {
-    const label = home === max ? p.fixture.home
-      : away === max ? p.fixture.away
+    const label = homeProb === max ? home
+      : awayProb === max ? away
       : 'Match nul';
     return { short: label, detail: `Issue dominante (${max}%) — un pronostic simple semble justifié.` };
   }
 
   const combinedOutcomes = [
-    { code: '1X', val: home + draw, label: `${p.fixture.home} ou match nul` },
-    { code: 'X2', val: draw + away, label: `Match nul ou ${p.fixture.away}` },
-    { code: '12', val: home + away, label: `${p.fixture.home} ou ${p.fixture.away} (sans nul)` },
+    { code: '1X', val: homeProb + draw, label: `${home} ou match nul` },
+    { code: 'X2', val: draw + awayProb, label: `Match nul ou ${away}` },
+    { code: '12', val: homeProb + awayProb, label: `${home} ou ${away} (sans nul)` },
   ].sort((a, b) => b.val - a.val);
   const best = combinedOutcomes[0];
 
@@ -72,6 +76,8 @@ function buildMatchComment(p) {
   const b = p.breakdown;
   if (!b) return '';
   const parts = [];
+  const home = escapeHtml(p.fixture.home);
+  const away = escapeHtml(p.fixture.away);
 
   const homeForm = formRecord(b.form?.home?.details);
   const awayForm = formRecord(b.form?.away?.details);
@@ -79,7 +85,7 @@ function buildMatchComment(p) {
     const homePts = homeForm.w * 3 + homeForm.d;
     const awayPts = awayForm.w * 3 + awayForm.d;
     if (Math.abs(homePts - awayPts) >= 3) {
-      const better = homePts > awayPts ? p.fixture.home : p.fixture.away;
+      const better = homePts > awayPts ? home : away;
       const rec = homePts > awayPts ? homeForm : awayForm;
       parts.push(`Forme récente favorable à ${better} (${rec.w}V-${rec.d}N-${rec.l}D sur les ${rec.n} derniers matchs).`);
     } else {
@@ -90,12 +96,14 @@ function buildMatchComment(p) {
   const homeInj = b.injuries?.team1?.count ?? 0;
   const awayInj = b.injuries?.team2?.count ?? 0;
   if (Math.abs(homeInj - awayInj) >= 2) {
-    const weaker = homeInj > awayInj ? p.fixture.home : p.fixture.away;
+    const weaker = homeInj > awayInj ? home : away;
     parts.push(`Effectif de ${weaker} fragilisé par ${Math.max(homeInj, awayInj)} absence(s) clé(s).`);
   } else if (homeInj === 0 && awayInj === 0) {
     parts.push(`Aucune absence majeure signalée des deux côtés.`);
   }
 
+  // b.h2h.summary est généré côté serveur uniquement à partir de compteurs numériques
+  // (voir algorithm/h2h.js) -> jamais de nom d'équipe ni de texte externe, safe tel quel.
   if (b.h2h?.summary) parts.push(b.h2h.summary);
 
   return parts.join(' ');
@@ -117,6 +125,14 @@ function buildModalContent(p) {
   const b = p.breakdown;
   const time = new Date(p.fixture.date).toLocaleString('fr-FR');
 
+  // Noms d'équipe/ligue : viennent de l'API foot / des scrapers externes, jamais de confiance
+  // avant affichage HTML (même règle que escapeHtml dans app.js/admin.js).
+  const home = escapeHtml(p.fixture.home);
+  const away = escapeHtml(p.fixture.away);
+  const league = escapeHtml(p.fixture.league);
+  const home8 = escapeHtml(p.fixture.home.substring(0, 8));
+  const away8 = escapeHtml(p.fixture.away.substring(0, 8));
+
   const barRow = (label, val) => `
     <div class="bar-row">
       <span class="bar-label">${label}</span>
@@ -130,8 +146,8 @@ function buildModalContent(p) {
   };
 
   return `
-    <div class="modal-title">${p.fixture.home} vs ${p.fixture.away}</div>
-    <div class="modal-league">${p.fixture.league} · ${time}</div>
+    <div class="modal-title">${home} vs ${away}</div>
+    <div class="modal-league">${league} · ${time}</div>
 
     ${p.breakdown ? `<p class="match-comment">${buildMatchComment(p)}</p>` : ''}
 
@@ -180,8 +196,8 @@ function buildModalContent(p) {
       <h3>Analyse des buts</h3>
       <div class="grid-2" style="grid-template-columns:1fr 1fr 1fr 1fr">
         ${p.goalPrediction.xGHome !== null ? `
-        <div class="stat-box"><div class="label">xG ${p.fixture.home.substring(0,8)}</div><div class="value" style="color:var(--blue)">${p.goalPrediction.xGHome}</div></div>
-        <div class="stat-box"><div class="label">xG ${p.fixture.away.substring(0,8)}</div><div class="value" style="color:var(--blue)">${p.goalPrediction.xGAway}</div></div>
+        <div class="stat-box"><div class="label">xG ${home8}</div><div class="value" style="color:var(--blue)">${p.goalPrediction.xGHome}</div></div>
+        <div class="stat-box"><div class="label">xG ${away8}</div><div class="value" style="color:var(--blue)">${p.goalPrediction.xGAway}</div></div>
         ` : ''}
         <div class="stat-box"><div class="label">Plus de 1,5 buts</div><div class="value" style="color:${p.goalPrediction.over15 >= 60 ? 'var(--green)' : 'var(--muted)'}">${p.goalPrediction.over15}%</div></div>
         <div class="stat-box"><div class="label">Plus de 2,5 buts</div><div class="value" style="color:${p.goalPrediction.over25 >= 50 ? 'var(--green)' : 'var(--muted)'}">${p.goalPrediction.over25}%</div></div>
@@ -209,8 +225,8 @@ function buildModalContent(p) {
     ${!p.noApiData ? `
     <div class="detail-section">
       <h3>Score algorithmique</h3>
-      ${barRow(p.fixture.home.substring(0, 8), p.scores.home)}
-      ${barRow(p.fixture.away.substring(0, 8), p.scores.away)}
+      ${barRow(home8, p.scores.home)}
+      ${barRow(away8, p.scores.away)}
     </div>` : `
     <div class="detail-section">
       <h3>Score algorithmique</h3>
@@ -219,9 +235,9 @@ function buildModalContent(p) {
 
     <div class="detail-section">
       <h3>Forme récente (5 derniers matchs)</h3>
-      <div style="margin-bottom:0.4rem;font-size:0.8rem;color:var(--muted)">${p.fixture.home}</div>
+      <div style="margin-bottom:0.4rem;font-size:0.8rem;color:var(--muted)">${home}</div>
       ${formHtml(b.form.home)}
-      <div style="margin-top:0.5rem;margin-bottom:0.4rem;font-size:0.8rem;color:var(--muted)">${p.fixture.away}</div>
+      <div style="margin-top:0.5rem;margin-bottom:0.4rem;font-size:0.8rem;color:var(--muted)">${away}</div>
       ${formHtml(b.form.away)}
     </div>
 
@@ -230,8 +246,8 @@ function buildModalContent(p) {
       <p style="font-size:0.85rem">${b.h2h.summary}</p>
       ${b.h2h.total > 0 ? `
         <div class="grid-2" style="margin-top:0.5rem">
-          <div class="stat-box"><div class="label">Victoires ${p.fixture.home}</div><div class="value">${b.h2h.team1Wins}</div></div>
-          <div class="stat-box"><div class="label">Victoires ${p.fixture.away}</div><div class="value">${b.h2h.team2Wins}</div></div>
+          <div class="stat-box"><div class="label">Victoires ${home}</div><div class="value">${b.h2h.team1Wins}</div></div>
+          <div class="stat-box"><div class="label">Victoires ${away}</div><div class="value">${b.h2h.team2Wins}</div></div>
         </div>` : ''}
     </div>
 
@@ -240,12 +256,12 @@ function buildModalContent(p) {
       <h3>Classement</h3>
       <div class="grid-2">
         <div class="stat-box">
-          <div class="label">${p.fixture.home}</div>
+          <div class="label">${home}</div>
           <div class="value">#${b.standings.team1.rank}</div>
           <div style="font-size:0.75rem;color:var(--muted)">${b.standings.team1.points} pts · GD ${b.standings.team1.goalsDiff > 0 ? '+' : ''}${b.standings.team1.goalsDiff}</div>
         </div>
         <div class="stat-box">
-          <div class="label">${p.fixture.away}</div>
+          <div class="label">${away}</div>
           <div class="value">#${b.standings.team2.rank}</div>
           <div style="font-size:0.75rem;color:var(--muted)">${b.standings.team2.points} pts · GD ${b.standings.team2.goalsDiff > 0 ? '+' : ''}${b.standings.team2.goalsDiff}</div>
         </div>
@@ -256,24 +272,24 @@ function buildModalContent(p) {
       <h3>Joueurs absents / suspendus${(b.injuries.team1.lineupConfirmed || b.injuries.team2.lineupConfirmed) ? ' <span style="font-size:0.7rem;font-weight:400;color:var(--green)">— confirmé par la composition officielle</span>' : ''}</h3>
       <div class="grid-2">
         <div class="stat-box">
-          <div class="label">${p.fixture.home} — ${b.injuries.team1.count} absent(s)</div>
+          <div class="label">${home} — ${b.injuries.team1.count} absent(s)</div>
           ${b.injuries.team1.players?.length > 0
             ? b.injuries.team1.players.map(pl => `
               <div class="injury-row">
-                <span class="injury-name">${pl.name}</span>
-                <span class="injury-pos">${pl.position}</span>
-                <span class="injury-reason ${pl.confirmedAvailable ? '' : (pl.suspended ? 'suspended' : 'injured')}" style="${pl.confirmedAvailable ? 'color:var(--green)' : ''}">${pl.confirmedAvailable ? '✅ Finalement disponible' : (pl.suspended ? '🟥 Suspendu' : '🤕 ' + pl.reason)}</span>
+                <span class="injury-name">${escapeHtml(pl.name)}</span>
+                <span class="injury-pos">${escapeHtml(pl.position)}</span>
+                <span class="injury-reason ${pl.confirmedAvailable ? '' : (pl.suspended ? 'suspended' : 'injured')}" style="${pl.confirmedAvailable ? 'color:var(--green)' : ''}">${pl.confirmedAvailable ? '✅ Finalement disponible' : (pl.suspended ? '🟥 Suspendu' : '🤕 ' + escapeHtml(pl.reason))}</span>
               </div>`).join('')
             : '<div style="color:var(--muted);font-size:0.8rem">Aucun absent connu</div>'}
         </div>
         <div class="stat-box">
-          <div class="label">${p.fixture.away} — ${b.injuries.team2.count} absent(s)</div>
+          <div class="label">${away} — ${b.injuries.team2.count} absent(s)</div>
           ${b.injuries.team2.players?.length > 0
             ? b.injuries.team2.players.map(pl => `
               <div class="injury-row">
-                <span class="injury-name">${pl.name}</span>
-                <span class="injury-pos">${pl.position}</span>
-                <span class="injury-reason ${pl.confirmedAvailable ? '' : (pl.suspended ? 'suspended' : 'injured')}" style="${pl.confirmedAvailable ? 'color:var(--green)' : ''}">${pl.confirmedAvailable ? '✅ Finalement disponible' : (pl.suspended ? '🟥 Suspendu' : '🤕 ' + pl.reason)}</span>
+                <span class="injury-name">${escapeHtml(pl.name)}</span>
+                <span class="injury-pos">${escapeHtml(pl.position)}</span>
+                <span class="injury-reason ${pl.confirmedAvailable ? '' : (pl.suspended ? 'suspended' : 'injured')}" style="${pl.confirmedAvailable ? 'color:var(--green)' : ''}">${pl.confirmedAvailable ? '✅ Finalement disponible' : (pl.suspended ? '🟥 Suspendu' : '🤕 ' + escapeHtml(pl.reason))}</span>
               </div>`).join('')
             : '<div style="color:var(--muted);font-size:0.8rem">Aucun absent connu</div>'}
         </div>
@@ -285,15 +301,15 @@ function buildModalContent(p) {
       <h3>Composition officielle</h3>
       <div class="grid-2">
         <div class="stat-box">
-          <div class="label">${p.fixture.home}${b.injuries.team1.formation ? ` (${b.injuries.team1.formation})` : ''}</div>
+          <div class="label">${home}${b.injuries.team1.formation ? ` (${escapeHtml(b.injuries.team1.formation)})` : ''}</div>
           ${b.injuries.team1.startXI?.length > 0
-            ? `<div style="font-size:0.8rem;line-height:1.6">${b.injuries.team1.startXI.join(', ')}</div>`
+            ? `<div style="font-size:0.8rem;line-height:1.6">${b.injuries.team1.startXI.map(escapeHtml).join(', ')}</div>`
             : '<div style="color:var(--muted);font-size:0.8rem">Pas encore publiée</div>'}
         </div>
         <div class="stat-box">
-          <div class="label">${p.fixture.away}${b.injuries.team2.formation ? ` (${b.injuries.team2.formation})` : ''}</div>
+          <div class="label">${away}${b.injuries.team2.formation ? ` (${escapeHtml(b.injuries.team2.formation)})` : ''}</div>
           ${b.injuries.team2.startXI?.length > 0
-            ? `<div style="font-size:0.8rem;line-height:1.6">${b.injuries.team2.startXI.join(', ')}</div>`
+            ? `<div style="font-size:0.8rem;line-height:1.6">${b.injuries.team2.startXI.map(escapeHtml).join(', ')}</div>`
             : '<div style="color:var(--muted);font-size:0.8rem">Pas encore publiée</div>'}
         </div>
       </div>
@@ -317,24 +333,47 @@ function validationCard(label, predicted, actual, correct) {
 
 function buildValidationContent(p) {
   const time = new Date(p.fixture.date).toLocaleString('fr-FR');
+  // Noms d'équipe/ligue : viennent de l'API foot / des scrapers externes, jamais de confiance
+  // avant affichage HTML (même règle que escapeHtml dans app.js/admin.js).
+  const home = escapeHtml(p.fixture.home);
+  const away = escapeHtml(p.fixture.away);
+  const league = escapeHtml(p.fixture.league);
   if (!p.validation) {
     return `
-      <div class="modal-title">${p.fixture.home} vs ${p.fixture.away}</div>
-      <div class="modal-league">${p.fixture.league} · ${time}</div>
+      <div class="modal-title">${home} vs ${away}</div>
+      <div class="modal-league">${league} · ${time}</div>
       <p style="margin-top:1rem;color:var(--muted)">Score final non disponible — impossible de valider la prédiction pour ce match.</p>`;
   }
 
-  const { actualScore, actualPick, correct, btts, over25 } = p.validation;
+  const { actualScore, scoreAt90, halftimeScore, wentToExtraTime, actualPick, correct, btts, over25 } = p.validation;
   const correctCount = [correct, btts?.correct, over25?.correct].filter((c) => c === true).length;
   const totalCount = [correct, btts?.correct, over25?.correct].filter((c) => c !== null && c !== undefined).length;
 
+  // Trois repères distincts pour éviter toute confusion : la mi-temps et le temps réglementaire
+  // (90 min, hors prolongation — c'est ce score qui sert à juger les pronostics) sont toujours
+  // séparés du score final, qui n'inclut la prolongation que si le match y est allé.
+  const scoreBoxes = [];
+  if (halftimeScore) {
+    scoreBoxes.push({ label: 'Mi-temps', value: `${halftimeScore.home} - ${halftimeScore.away}` });
+  }
+  scoreBoxes.push({
+    label: wentToExtraTime ? 'Temps réglementaire (90 min)' : 'Score final',
+    value: `${scoreAt90.home} - ${scoreAt90.away}`,
+  });
+  if (wentToExtraTime) {
+    scoreBoxes.push({ label: 'Score final (après prolongation)', value: `${actualScore.home} - ${actualScore.away}` });
+  }
+
   return `
-    <div class="modal-title">${p.fixture.home} vs ${p.fixture.away}</div>
-    <div class="modal-league">${p.fixture.league} · ${time}</div>
+    <div class="modal-title">${home} vs ${away}</div>
+    <div class="modal-league">${league} · ${time}</div>
 
     <div class="detail-section">
       <h3>Résultat final</h3>
-      <div class="stat-box"><div class="label">Score</div><div class="value">${actualScore.home} - ${actualScore.away}</div></div>
+      <div class="grid-2" style="grid-template-columns:repeat(${scoreBoxes.length},1fr)">
+        ${scoreBoxes.map((b) => `<div class="stat-box"><div class="label">${b.label}</div><div class="value">${b.value}</div></div>`).join('')}
+      </div>
+      ${wentToExtraTime ? '<div style="font-size:0.75rem;color:var(--muted);margin-top:0.4rem">Pronostics jugés sur le temps réglementaire, hors prolongation</div>' : ''}
     </div>
 
     <div class="detail-section">

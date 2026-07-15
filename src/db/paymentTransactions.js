@@ -30,9 +30,13 @@ async function findById(id) {
 }
 
 async function markStatus(reference, status) {
-  const completedAt = status === 'completed' ? 'now()' : 'NULL';
+  // status/reference restent paramétrés même pour la partie CASE : pas de concaténation de
+  // requête SQL, y compris pour une valeur aujourd'hui fixe (voir routes/payments.js) — évite
+  // qu'un futur appelant qui laisserait passer une valeur non contrôlée ouvre une injection.
   const { rows } = await pool.query(
-    `UPDATE payment_transactions SET status = $1, completed_at = ${completedAt} WHERE reference = $2 RETURNING *`,
+    `UPDATE payment_transactions
+     SET status = $1, completed_at = CASE WHEN $1 = 'completed' THEN now() ELSE NULL END
+     WHERE reference = $2 RETURNING *`,
     [status, reference]
   );
   return rows[0] || null;

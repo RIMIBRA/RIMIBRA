@@ -70,15 +70,26 @@ function matchStateFor(statusShort, kickoffIso) {
 
 // Compare chaque type de prédiction au résultat réel — uniquement calculable une fois le
 // match terminé. Couvre l'issue (1X2) et, si une prédiction de buts a été faite, BTTS et +/-2,5.
-function computeValidation(predictedPick, homeScore, awayScore, goalPrediction) {
+// homeScore/awayScore = score à 90 min (hors prolongation/tab) : 1X2, BTTS et +/-2,5 sont des
+// marchés qui se jugent sur le temps réglementaire, pas sur le score après prolongation — sinon
+// un pronostic juste à la 90e peut être invalidé par des buts marqués en prolongation.
+// finalScore = score réel du match (prolongation incluse si il y en a eu) pour l'affichage.
+// halftimeScore = score à la mi-temps (45e min), purement informatif, ne sert à aucune validation.
+function computeValidation(predictedPick, homeScore, awayScore, goalPrediction, finalScore, halftimeScore) {
   if (homeScore == null || awayScore == null) return null;
   let actualPick;
   if (homeScore > awayScore) actualPick = '1 (Domicile)';
   else if (awayScore > homeScore) actualPick = '2 (Extérieur)';
   else actualPick = 'X (Nul)';
 
+  const wentToExtraTime = !!finalScore &&
+    (finalScore.home !== homeScore || finalScore.away !== awayScore);
+
   const result = {
-    actualScore: { home: homeScore, away: awayScore },
+    actualScore: finalScore || { home: homeScore, away: awayScore },
+    scoreAt90: { home: homeScore, away: awayScore },
+    halftimeScore: halftimeScore?.home != null && halftimeScore?.away != null ? halftimeScore : null,
+    wentToExtraTime,
     actualPick,
     correct: actualPick === predictedPick,
   };
@@ -126,11 +137,17 @@ function buildFinishedEntry(f) {
 // Complète les pronostics pris quand ces matchs étaient encore "upcoming" — sans ré-analyser
 // (le score final suffit). Idempotent : resolvePrediction ignore les matchs déjà résolus ou
 // jamais pronostiqués (hors sélection, quota épuisé ce jour-là...).
+// score.fulltime (90 min) plutôt que goals (prolongation incluse) : mêmes marchés, même règle
+// que computeValidation ci-dessus — sinon les stats de précision (getAccuracyStats) comptent
+// à tort comme ratés des pronostics justes à 90 min sur des matchs allés en prolongation.
 function resolveFinishedFixtures(finishedFixtures) {
   for (const f of finishedFixtures) {
-    if (f.goals?.home != null && f.goals?.away != null) {
+    const ft = f.score?.fulltime;
+    const homeScore = ft?.home ?? f.goals?.home;
+    const awayScore = ft?.away ?? f.goals?.away;
+    if (homeScore != null && awayScore != null) {
       predictionResults
-        .resolvePrediction('football', f.fixture.id, f.goals.home, f.goals.away)
+        .resolvePrediction('football', f.fixture.id, homeScore, awayScore)
         .catch((err) => console.error('Échec résolution pronostic (ignoré):', err.message));
     }
   }
@@ -373,8 +390,19 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
   const algoPick = pickFromProbabilities(algoProbs, homeScore, awayScore);
   const goalPrediction = calcGoalPrediction(formHome, formAway);
   const matchState = matchStateFor(fixture.fixture.status.short, fixture.fixture.date);
+  // score.fulltime = résultat à 90 min (absent pour AWD/WO -> retombe sur goals, seul dispo).
+  const ft = fixture.score?.fulltime;
+  const gradingHomeScore = ft?.home ?? fixture.goals?.home;
+  const gradingAwayScore = ft?.away ?? fixture.goals?.away;
   const validation = matchState === 'finished'
-    ? computeValidation(recommendation.pick, fixture.goals?.home, fixture.goals?.away, goalPrediction)
+    ? computeValidation(
+        recommendation.pick,
+        gradingHomeScore,
+        gradingAwayScore,
+        goalPrediction,
+        { home: fixture.goals?.home, away: fixture.goals?.away },
+        fixture.score?.halftime
+      )
     : null;
 
   const webSourceFlags = {

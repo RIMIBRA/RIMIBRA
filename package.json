@@ -26,6 +26,7 @@
     "express-rate-limit": "^8.5.2",
     "helmet": "^8.2.0",
     "jsonwebtoken": "^9.0.3",
+    "nodemailer": "^9.0.3",
     "pg": "^8.22.0",
     "pm2": "^7.0.3",
     "puppeteer": "^22.0.0",

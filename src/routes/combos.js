@@ -588,19 +588,28 @@ async function enrichMatchStatus(sport, match) {
     if (!raw) return { ...match, finished: false, validated: null };
 
     const finished = FINISHED_STATUSES.includes(raw.fixture.status.short);
-    const home = raw.goals?.home;
-    const away = raw.goals?.away;
 
     if (!finished) {
       // Match encore en cours : certains marchés sont déjà mathématiquement acquis avant la
       // fin (un but ou un set déjà joué ne s'annule pas, voir isOutcomeLockedIn) — affiche ce
       // signal par match sans jamais déclarer le COMBINÉ entier gagné avant la fin réelle de
-      // tous ses matchs (summarize() exige toujours finished=true partout pour ça).
-      if (home != null && away != null && isOutcomeLockedIn(match.betType, home, away)) {
-        return { ...match, finished: false, validated: true, actualScore: { home, away } };
+      // tous ses matchs (summarize() exige toujours finished=true partout pour ça). On utilise
+      // le score live (goals) : score.fulltime n'est posé par le fournisseur qu'une fois les
+      // 90 min jouées, donc encore vide pendant le match.
+      const liveHome = raw.goals?.home;
+      const liveAway = raw.goals?.away;
+      if (liveHome != null && liveAway != null && isOutcomeLockedIn(match.betType, liveHome, liveAway)) {
+        return { ...match, finished: false, validated: true, actualScore: { home: liveHome, away: liveAway } };
       }
       return { ...match, finished: false, validated: null };
     }
+
+    // score.fulltime (90 min, foot uniquement) prime sur goals (prolongation incluse) — mêmes
+    // marchés jugés hors prolongation que dans algorithm/predictor.js#computeValidation.
+    // Absent pour les autres sports (pas de champ "fulltime" dans leurs clients API) -> repli
+    // silencieux sur goals, comportement inchangé pour eux.
+    const home = raw.score?.fulltime?.home ?? raw.goals?.home;
+    const away = raw.score?.fulltime?.away ?? raw.goals?.away;
 
     if (home == null || away == null) return { ...match, finished: true, validated: null };
 
