@@ -247,16 +247,25 @@ function buildComboMatches(predictions, usedIds, leagueIds, rankFn = pickProbabi
   return { matches, combinedProbability, risk };
 }
 
-// Liste les matchs du jour utilisables dans un combiné manuel (voir createManualCombo) —
+// Liste les matchs utilisables dans un combiné manuel (voir createManualCombo) —
 // TOUS les matchs analysés avec des probabilités, sans le filtre de ligues automatique :
 // le fondateur choisit librement depuis le dashboard admin. query (optionnel) bascule sur la
 // recherche à la demande de chaque sport (searchFixtures/searchGames) au lieu de la sélection
 // automatique du jour (plafonnée à MAX_FIXTURES_PER_DAY, ex. 30 pour le foot) — retrouve un
 // match précis même hors de cette sélection, comme la recherche publique de l'app.
-async function listComboCandidates(sportKey, date, query) {
+// spanDays (optionnel, défaut 1) : couvre N jours consécutifs à partir de date — permet de
+// choisir un match demain ou après-demain dans un combiné créé aujourd'hui.
+async function listComboCandidates(sportKey, date, query, spanDays = 1) {
   const sport = SPORTS.find((s) => s.key === sportKey);
   if (!sport) throw new Error(`Sport inconnu : ${sportKey}`);
-  const { results } = query ? await sport.search(date, query) : await sport.analyzeDay(date);
+  let results;
+  if (query) {
+    ({ results } = await sport.search(date, query));
+  } else if (spanDays > 1) {
+    results = await analyzeDaysForSport(sport, date, Math.min(spanDays, 7));
+  } else {
+    ({ results } = await sport.analyzeDay(date));
+  }
   const candidates = results.filter((p) => !p.error && !p.insufficientData && p.matchState !== 'finished' && p.probabilities);
 
   // Cotes réelles "nombre de sets" (tennis uniquement, voir resolveSetsMarket) — un appel par
@@ -265,6 +274,7 @@ async function listComboCandidates(sportKey, date, query) {
   // envers l'API externe.
   const withMarkets = await mapWithConcurrency(candidates, 10, async (p) => ({
     fixtureId: p.fixture.id,
+    date: p.fixture.date,
     home: p.fixture.home,
     away: p.fixture.away,
     league: p.fixture.league,
@@ -295,22 +305,18 @@ async function listComboCandidates(sportKey, date, query) {
 // alors son propre champ `sport` (voir enrichMatchStatus pour la résolution des résultats).
 const MULTI_LABEL = '🌍 Multi-sports';
 const SPECIAL_LABEL = '🌟 Spécial';
-const COMBO_MAX_MATCHES = 5;
 
 // Combiné créé manuellement par le fondateur (dashboard admin) — contourne volontairement le
 // filtre de ligues ET la barre des 50% des combinés automatiques : un choix humain explicite
-// prime sur les règles. selections: [{ sport, fixtureId, betType }], 2 à 5 matchs, éventuellement
-// de sports différents (combiné enregistré sous 'multi' dans ce cas). betType (optionnel, par
-// match) choisit le marché ciblé — 1/X/2, BTTS/total de buts (foot), nombre de sets (tennis),
-// voir resolveBetSelection ; absent -> pick recommandé par l'algo, comme avant.
+// prime sur les règles. selections: [{ sport, fixtureId, betType }], au moins 2 matchs,
+// éventuellement de sports différents (combiné enregistré sous 'multi' dans ce cas).
+// betType (optionnel, par match) choisit le marché ciblé — 1/X/2, BTTS/total de buts (foot),
+// nombre de sets (tennis), voir resolveBetSelection ; absent -> pick recommandé par l'algo.
 // options.special marque le combiné pour la section
 // "Spécial" (voir getSpecialComboSeries) au lieu de son onglet sport/multi habituel.
 async function createManualCombo(date, selections, options = {}) {
   if (!Array.isArray(selections) || selections.length < 2) {
     throw new Error('Au moins 2 matchs sont requis pour un combiné');
-  }
-  if (selections.length > COMBO_MAX_MATCHES) {
-    throw new Error(`Maximum ${COMBO_MAX_MATCHES} matchs par combiné`);
   }
 
   const sportKeys = [...new Set(selections.map((s) => s.sport))];
@@ -380,12 +386,13 @@ async function createManualCombo(date, selections, options = {}) {
 // Rassemble les candidats de TOUS les sports pour le combiné multi automatique — mêmes règles
 // par sport que les combinés classiques (dont le filtre de compétitions du foot) ; un sport en
 // échec (quota épuisé, réseau) est simplement ignoré plutôt que de bloquer les autres.
+// Couvre COMBO_SPAN_DAYS jours comme les combinés mono-sport (matchs de demain inclus si > 1).
 async function collectMultiSportCandidates(date, usedIds) {
   const perSport = await Promise.all(SPORTS.map(async (sport) => {
     try {
-      const { results } = await sport.analyzeDay(date);
+      const allResults = await analyzeDaysForSport(sport, date, COMBO_SPAN_DAYS);
       const leagueFilter = sport.key === 'football' ? FOOTBALL_COMBO_LEAGUE_IDS : undefined;
-      return results
+      return allResults
         .filter((p) => isComboCandidate(p, usedIds, leagueFilter))
         .map((p) => ({ p, sportKey: sport.key, prob: pickProbability(p) }));
     } catch {
@@ -394,6 +401,8 @@ async function collectMultiSportCandidates(date, usedIds) {
   }));
   return perSport.flat().sort((a, b) => b.prob - a.prob);
 }
+
+const MULTI_AUTO_MAX_MATCHES = 5; // limite uniquement pour le combiné multi automatique
 
 // Combiné multi-sports automatique : les meilleurs matchs toutes disciplines confondues, de 2
 // jusqu'à 5, en ajoutant tant que la probabilité combinée reste au-dessus de la barre des 50%
@@ -404,7 +413,7 @@ function buildMultiComboMatches(candidates) {
   const chosen = [];
   let combined = 1;
   for (const c of candidates) {
-    if (chosen.length >= COMBO_MAX_MATCHES) break;
+    if (chosen.length >= MULTI_AUTO_MAX_MATCHES) break;
     const next = combined * (c.prob / 100);
     if (chosen.length < 2) {
       chosen.push(c);
@@ -619,6 +628,25 @@ function summarize(matches) {
   return { validatedCount, finishedCount: matches.filter((m) => m.finished).length, totalCount: matches.length, status };
 }
 
+// Nombre de jours consécutifs couverts par chaque combiné automatique (aujourd'hui inclus).
+// COMBO_SPAN_DAYS=1 = comportement original (un seul jour), 2 = aujourd'hui + demain, etc.
+const COMBO_SPAN_DAYS = Math.max(1, Math.min(7, parseInt(process.env.COMBO_SPAN_DAYS || '2', 10)));
+
+// Renvoie les résultats fusionnés de analyzeDay sur les spanDays jours à partir de baseDate.
+// Un jour en échec (quota épuisé, réseau) est simplement ignoré plutôt que de bloquer les autres.
+async function analyzeDaysForSport(sport, baseDate, spanDays) {
+  const dates = Array.from({ length: spanDays }, (_, i) => addDays(baseDate, i));
+  const perDay = await Promise.all(dates.map(async (d) => {
+    try {
+      const { results } = await sport.analyzeDay(d);
+      return results;
+    } catch {
+      return [];
+    }
+  }));
+  return perDay.flat();
+}
+
 // Renvoie tous les combinés du jour pour ce sport (historique + actif), en générant un
 // nouveau combiné seulement si le précédent est résolu (gagné ou perdu) — jamais pendant
 // qu'un combiné est encore en cours.
@@ -641,10 +669,10 @@ async function getOrCreateComboSeries(sport, date) {
 
   if (needsNewCombo) {
     const usedIds = new Set(stored.flatMap((row) => row.matches.map((m) => String(m.fixtureId))));
-    const { results } = await sport.analyzeDay(date);
+    const allResults = await analyzeDaysForSport(sport, date, COMBO_SPAN_DAYS);
     const leagueFilter = sport.key === 'football' ? FOOTBALL_COMBO_LEAGUE_IDS : undefined;
     const rankFn = sport.key === 'football' ? footballComboRank : undefined;
-    const built = buildComboMatches(results, usedIds, leagueFilter, rankFn);
+    const built = buildComboMatches(allResults, usedIds, leagueFilter, rankFn);
     if (built) {
       await saveCombo(date, sport.key, sport.label, built.matches, built.combinedProbability, built.risk);
       const matches = built.matches.map((m) => ({ ...m, finished: false, validated: null }));
@@ -860,7 +888,7 @@ module.exports.SPORTS = SPORTS;
 module.exports.listComboCandidates = listComboCandidates;
 module.exports.createManualCombo = createManualCombo;
 module.exports.buildMultiComboMatches = buildMultiComboMatches;
-module.exports.COMBO_MAX_MATCHES = COMBO_MAX_MATCHES;
+module.exports.MULTI_AUTO_MAX_MATCHES = MULTI_AUTO_MAX_MATCHES;
 module.exports.MULTI_LABEL = MULTI_LABEL;
 module.exports.SPECIAL_LABEL = SPECIAL_LABEL;
 module.exports.resolveBetSelection = resolveBetSelection;
