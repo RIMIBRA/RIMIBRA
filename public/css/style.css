@@ -53,10 +53,77 @@ header h1 { font-size: 1.4rem; }
 .api-status span.danger { background: rgba(248,81,73,0.15); color: var(--red); }
 
 #account-status a { color: var(--blue); text-decoration: none; }
-#account-status .plan-free { background: var(--border); color: var(--muted); }
-#account-status .plan-premium { background: rgba(88,166,255,0.15); color: var(--blue); }
-#account-status .plan-vip { background: rgba(188,140,255,0.15); color: var(--purple); }
-#account-status .plan-admin { background: rgba(210,153,34,0.15); color: var(--yellow); }
+
+/* Menu compte (voir renderAccountStatus dans app.js) : replié dans un menu déroulant derrière
+   un avatar rond — même pattern d'interaction que .notif-wrap/.notif-panel juste à côté, pour
+   ne jamais faire déborder le header (email + plan + jusqu'à 4 liens tenaient mal à plat,
+   surtout sur mobile où ils se retrouvaient coupés). */
+.account-wrap { position: relative; }
+
+.account-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.account-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.account-avatar.plan-free { background: var(--border); color: var(--muted); }
+.account-avatar.plan-premium { background: rgba(88,166,255,0.25); color: var(--blue); }
+.account-avatar.plan-vip { background: rgba(188,140,255,0.25); color: var(--purple); }
+.account-avatar.plan-admin { background: rgba(210,153,34,0.25); color: var(--yellow); }
+
+.account-panel {
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.account-panel-header {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+.account-email {
+  font-size: 0.85rem;
+  word-break: break-all;
+}
+.plan-badge {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.6rem;
+  border-radius: 20px;
+}
+.plan-badge.plan-free { background: var(--border); color: var(--muted); }
+.plan-badge.plan-premium { background: rgba(88,166,255,0.15); color: var(--blue); }
+.plan-badge.plan-vip { background: rgba(188,140,255,0.15); color: var(--purple); }
+.plan-badge.plan-admin { background: rgba(210,153,34,0.15); color: var(--yellow); }
+
+.account-panel-links { display: flex; flex-direction: column; }
+.account-panel-links a {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.85rem;
+  padding: 0 0.5rem;
+  border-radius: 6px;
+}
+.account-panel-links a:hover { background: rgba(255,255,255,0.06); }
 
 /* Cloche de notifications (boîte in-app, voir routes/notifications.js) */
 .notif-wrap { position: relative; }
