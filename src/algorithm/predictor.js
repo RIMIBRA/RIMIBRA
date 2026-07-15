@@ -11,6 +11,7 @@ const forebet = require('../scraper/forebet');
 const oddsapi = require('../scraper/oddsapi');
 const soccerway = require('../scraper/soccerway');
 const { buildOddsMap } = require('./bookmakerOdds');
+const apiPrediction = require('./apiPrediction');
 const { normalize, expandSearchTerms } = require('./teamAliases');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const cache = require('../cache/db');
@@ -329,14 +330,16 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
       api.getStandings(leagueId, season),
       api.getInjuries(fixtureId),
       shouldFetchLineups ? api.getLineups(fixtureId) : Promise.resolve(null),
+      api.getPredictions(fixtureId),
     ]).then((results) => results.map((r) => (r.status === 'fulfilled' ? r.value : null))),
     scraper.enrichFixture(homeTeam.name, awayTeam.name, date, fpredList, forebetList, oddsapiList, minor),
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : null)));
 
-  const [homeFixtures, awayFixtures, h2hFixtures, standingsData, injuriesData, lineupsData] = apiResults || [null, null, null, null, null, null];
-  // apiOdds : simple lookup local (déjà calculé plus haut), pas un appel réseau -> ajouté après
-  // coup plutôt que dans le Promise.allSettled de scraper.enrichFixture.
-  const web = { ...(webSources || {}), apiOdds: apiOddsMatch };
+  const [homeFixtures, awayFixtures, h2hFixtures, standingsData, injuriesData, lineupsData, predictionsData] = apiResults || [null, null, null, null, null, null, null];
+  // apiOdds/apiPrediction : soit un lookup local déjà calculé (apiOdds), soit un appel déjà fait
+  // ci-dessus (predictionsData) -> ajoutés après coup plutôt que dans enrichFixture, qui ne gère
+  // que les sources externes (scrapers + oddsapi), pas l'API foot elle-même.
+  const web = { ...(webSources || {}), apiOdds: apiOddsMatch, apiPrediction: apiPrediction.extractProbabilities(predictionsData) };
 
   let formHome = analyzeForm(homeFixtures, homeTeam.id);
   let formAway = analyzeForm(awayFixtures, awayTeam.id);
@@ -383,7 +386,8 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
     web.forebet?.probabilities ||
     web.besoccer?.probabilities ||
     web.oddsapi?.probabilities ||
-    web.apiOdds?.probabilities
+    web.apiOdds?.probabilities ||
+    web.apiPrediction?.probabilities
   );
   // Ni l'algo (forme/h2h inconnus) ni les sources web n'ont de signal exploitable :
   // une prédiction chiffrée serait trompeuse (toujours la même valeur par défaut)
@@ -423,6 +427,7 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
     flashscore: !!web.flashscore,
     soccerway: formHome.source === 'soccerway' || formAway.source === 'soccerway',
     apiOdds: !!web.apiOdds,
+    apiPrediction: !!web.apiPrediction,
   };
 
   // Uniquement les vrais pronostics pris avant le match (pas "Analyse non disponible", pas

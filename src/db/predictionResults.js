@@ -129,7 +129,7 @@ async function resolvePrediction(sport, fixtureId, homeScore, awayScore) {
 
 // Sources externes mêlées à l'algo (voir scraper/index.js blendProbabilities) — mesurer leur
 // taux de réussite individuel permet de savoir lesquelles méritent vraiment leur poids.
-const SOURCE_KEYS = ['footballpred', 'forebet', 'besoccer', 'oddsapi', 'flashscore', 'soccerway', 'apiOdds'];
+const SOURCE_KEYS = ['footballpred', 'forebet', 'besoccer', 'oddsapi', 'flashscore', 'soccerway', 'apiOdds', 'apiPrediction'];
 
 async function getAccuracyStats(sport = 'football', sinceDays = 30) {
   const sourceColumns = SOURCE_KEYS.map(

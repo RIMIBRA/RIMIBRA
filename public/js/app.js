@@ -74,7 +74,40 @@ async function renderAccountStatus() {
       : '<a href="#" id="push-toggle-link">🔕 Activer les notifications</a>';
   }
 
-  accountStatus.innerHTML = `<span class="plan-${user.isAdmin ? 'admin' : user.plan}">${escapeHtml(user.email)} · ${planLabel}</span> ${upgradeLink} ${pushLinkHtml} ${dashboardLink} <a href="#" id="logout-link">Déconnexion</a>`;
+  // Menu compte replié dans un menu déroulant (même pattern que la cloche de notifications
+  // juste à côté) : tout afficher à plat (email + plan + 2-4 liens) débordait du header sur
+  // mobile et se retrouvait coupé/illisible.
+  const planClass = user.isAdmin ? 'admin' : user.plan;
+  accountStatus.innerHTML = `
+    <div class="account-wrap" id="account-wrap">
+      <button id="account-toggle" class="notif-bell account-toggle" type="button" aria-haspopup="true" aria-expanded="false" aria-label="Compte : ${escapeHtml(user.email)}">
+        <span class="account-avatar plan-${planClass}">${escapeHtml(user.email.charAt(0).toUpperCase())}</span>
+      </button>
+      <div id="account-panel" class="notif-panel account-panel hidden">
+        <div class="account-panel-header">
+          <span class="account-email">${escapeHtml(user.email)}</span>
+          <span class="plan-badge plan-${planClass}">${planLabel}</span>
+        </div>
+        <div class="account-panel-links">
+          ${upgradeLink}
+          ${pushLinkHtml}
+          ${dashboardLink}
+          <a href="#" id="logout-link">🚪 Déconnexion</a>
+        </div>
+      </div>
+    </div>`;
+
+  document.getElementById('account-toggle').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const panel = document.getElementById('account-panel');
+    const wasHidden = panel.classList.contains('hidden');
+    closeNotifPanel();
+    closeAccountPanel();
+    panel.classList.toggle('hidden', !wasHidden);
+    e.currentTarget.setAttribute('aria-expanded', String(wasHidden));
+  });
+  document.getElementById('account-panel').addEventListener('click', (e) => e.stopPropagation());
+
   document.getElementById('logout-link').addEventListener('click', (e) => {
     e.preventDefault();
     clearToken();
@@ -142,11 +175,19 @@ function closeNotifPanel() {
   document.getElementById('notif-panel')?.classList.add('hidden');
 }
 
+// Menu compte (voir renderAccountStatus) — recréé à chaque rendu, donc pas de classList direct
+// ici (l'élément peut ne pas encore exister avant la 1ère connexion), toujours via getElementById.
+function closeAccountPanel() {
+  document.getElementById('account-panel')?.classList.add('hidden');
+  document.getElementById('account-toggle')?.setAttribute('aria-expanded', 'false');
+}
+
 document.getElementById('notif-bell')?.addEventListener('click', async (e) => {
   e.stopPropagation();
   const panel = document.getElementById('notif-panel');
   const wasHidden = panel.classList.contains('hidden');
   closeNotifPanel();
+  closeAccountPanel();
   if (wasHidden) {
     panel.classList.remove('hidden');
     refreshNotifications();
@@ -161,8 +202,12 @@ document.getElementById('notif-markall')?.addEventListener('click', async (e) =>
 document.addEventListener('click', (e) => {
   const wrap = document.getElementById('notif-wrap');
   if (wrap && !wrap.contains(e.target)) closeNotifPanel();
+  const accountWrap = document.getElementById('account-wrap');
+  if (accountWrap && !accountWrap.contains(e.target)) closeAccountPanel();
 });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNotifPanel(); });
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { closeNotifPanel(); closeAccountPanel(); }
+});
 
 // Top 3 / Top 2 (les sélections les plus resserrées, donc les plus "vendables") réservés aux
 // abonnés payants — Top 10/Top 5/Tous restent accessibles à tous. Purement un filtre d'affichage
