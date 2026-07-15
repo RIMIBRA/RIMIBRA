@@ -37,12 +37,14 @@ function getRecommendation(probs, sourceCount) {
 }
 
 async function buildWebPrediction(homeTeam, awayTeam, fpredList, forebetList, predictzList, oddsapiList) {
-  const fpredMatch    = footballpred.findPrediction(fpredList,   homeTeam, awayTeam);
   const forebetMatch  = forebet.findPrediction(forebetList,      homeTeam, awayTeam);
   const predictzMatch = predictz.findPrediction(predictzList,    homeTeam, awayTeam);
   const oddsMatch     = oddsapi.findMatch(oddsapiList || [],     homeTeam, awayTeam);
 
-  const [bscData] = await Promise.allSettled([
+  // footballpred nécessite une requête par match (voir scraper/footballpred.js), rejoint donc
+  // le lot parallèle plutôt que d'être attendu séparément.
+  const [fpredMatch, bscData] = await Promise.allSettled([
+    footballpred.findPrediction(fpredList, homeTeam, awayTeam),
     besoccer.getMatchData(homeTeam, awayTeam),
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : null)));
 

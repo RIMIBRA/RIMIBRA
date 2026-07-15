@@ -12,14 +12,16 @@ async function enrichFixture(homeTeam, awayTeam, date, fpredList = null, forebet
   const forebetSource = forebetList || await forebet.getTodayPredictions(date);
   const oddsSource = oddsapiList || await oddsapi.getTodayOdds();
 
-  const fpredMatch = footballpred.findPrediction(fpredSource, homeTeam, awayTeam);
   const forebetMatch = forebet.findPrediction(forebetSource, homeTeam, awayTeam);
   const oddsMatch = oddsapi.findMatch(oddsSource, homeTeam, awayTeam);
 
-  // Scraping en parallèle — les deux peuvent échouer sans bloquer l'analyse.
-  // Pour une ligue mineure : besoccer trouve presque toujours un faux négatif (~2-4s perdues),
-  // et flashscore (Puppeteer, ~5-8s) seulement si oddsapi n'a pas déjà les cotes.
-  const [bscData, fsData] = await Promise.allSettled([
+  // Scraping en parallèle — tous peuvent échouer sans bloquer l'analyse. footballpred nécessite
+  // désormais une requête par match (voir scraper/footballpred.js#fetchMatchPrediction) donc
+  // rejoint le lot parallèle plutôt que d'être attendu séparément. Pour une ligue mineure :
+  // besoccer trouve presque toujours un faux négatif (~2-4s perdues), et flashscore (Puppeteer,
+  // ~5-8s) seulement si oddsapi n'a pas déjà les cotes.
+  const [fpredMatch, bscData, fsData] = await Promise.allSettled([
+    footballpred.findPrediction(fpredSource, homeTeam, awayTeam),
     skipFlashscore ? Promise.resolve(null) : besoccer.getMatchData(homeTeam, awayTeam),
     (oddsMatch || skipFlashscore) ? Promise.resolve(null) : flashscore.getMatchOdds(homeTeam, awayTeam),
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : null)));
