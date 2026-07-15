@@ -10,6 +10,7 @@ const { analyzeWebDay, analyzeWebDayWithFixtures } = require('./webPredictor');
 const forebet = require('../scraper/forebet');
 const oddsapi = require('../scraper/oddsapi');
 const soccerway = require('../scraper/soccerway');
+const { buildOddsMap } = require('./bookmakerOdds');
 const { normalize, expandSearchTerms } = require('./teamAliases');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const cache = require('../cache/db');
@@ -217,10 +218,14 @@ function isPriorityLeague(fixture) {
 // (qui n'ont ni historique ni cotes exploitables → analyse "données insuffisantes")
 // sont reléguées en fin de liste, pour laisser la place aux matchs vraiment intéressants
 // (ex : amicaux de sélections nationales avant une Coupe du Monde)
-function fixtureRank(f, oddsapiList, fpredList) {
+function fixtureRank(f, oddsapiList, fpredList, apiOddsMap) {
   let score = 0;
   // Coupe du Monde et grands championnats : priorité forte, ce sont les pronostics les plus fiables
   if (isPriorityLeague(f)) score += 10;
+  // Cotes de plusieurs bookmakers liées directement à cet id de fixture (voir
+  // algorithm/bookmakerOdds.js) — signal plus fiable que oddsapi (couverture plus large,
+  // pas de matching approximatif par nom), donc même poids.
+  if (apiOddsMap?.has(f.fixture.id)) score += 2;
   if (oddsapi.findMatch(oddsapiList, f.teams.home.name, f.teams.away.name)) score += 2;
   if (footballpred.isInFpred(fpredList, f.teams.home.name, f.teams.away.name)) score += 1;
   if (isLikelyMinor(f)) score -= 3;
@@ -293,18 +298,20 @@ function hasNoData(formHome, formAway, h2h) {
   );
 }
 
-async function analyzeFixture(fixture, fpredList = null, forebetList = null, oddsapiList = null, { featured = true } = {}) {
+async function analyzeFixture(fixture, fpredList = null, forebetList = null, oddsapiList = null, apiOddsMap = null, { featured = true } = {}) {
   const homeTeam = fixture.teams.home;
   const awayTeam = fixture.teams.away;
   const leagueId = fixture.league.id;
   const season = fixture.league.season;
   const fixtureId = fixture.fixture.id;
   const date = fixture.fixture.date.split('T')[0];
+  const apiOddsMatch = apiOddsMap?.get(fixtureId) || null;
   // Ligues U15-23/jeunes/réserves OU ligues obscures sans aucune couverture (pas de cotes,
   // pas de footballpred, pas une compétition majeure) : le fallback Puppeteer (~10s) y trouve
   // très rarement quelque chose d'exploitable — pas la peine de payer ce coût en temps
   const minor = isLikelyMinor(fixture) || (
     !isPriorityLeague(fixture) &&
+    !apiOddsMatch &&
     !oddsapi.findMatch(oddsapiList, homeTeam.name, awayTeam.name) &&
     !footballpred.isInFpred(fpredList, homeTeam.name, awayTeam.name)
   );
@@ -327,7 +334,9 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
   ]).then((r) => r.map((x) => (x.status === 'fulfilled' ? x.value : null)));
 
   const [homeFixtures, awayFixtures, h2hFixtures, standingsData, injuriesData, lineupsData] = apiResults || [null, null, null, null, null, null];
-  const web = webSources || {};
+  // apiOdds : simple lookup local (déjà calculé plus haut), pas un appel réseau -> ajouté après
+  // coup plutôt que dans le Promise.allSettled de scraper.enrichFixture.
+  const web = { ...(webSources || {}), apiOdds: apiOddsMatch };
 
   let formHome = analyzeForm(homeFixtures, homeTeam.id);
   let formAway = analyzeForm(awayFixtures, awayTeam.id);
@@ -373,7 +382,8 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
     web.footballpred?.probabilities ||
     web.forebet?.probabilities ||
     web.besoccer?.probabilities ||
-    web.oddsapi?.probabilities
+    web.oddsapi?.probabilities ||
+    web.apiOdds?.probabilities
   );
   // Ni l'algo (forme/h2h inconnus) ni les sources web n'ont de signal exploitable :
   // une prédiction chiffrée serait trompeuse (toujours la même valeur par défaut)
@@ -412,6 +422,7 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
     oddsapi: !!web.oddsapi,
     flashscore: !!web.flashscore,
     soccerway: formHome.source === 'soccerway' || formAway.source === 'soccerway',
+    apiOdds: !!web.apiOdds,
   };
 
   // Uniquement les vrais pronostics pris avant le match (pas "Analyse non disponible", pas
@@ -465,7 +476,7 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
     insufficientData,
     webMode: false,
     webSources: webSourceFlags,
-    odds: web.oddsapi?.rawOdds || web.flashscore?.rawOdds || null,
+    odds: web.apiOdds?.rawOdds || web.oddsapi?.rawOdds || web.flashscore?.rawOdds || null,
     breakdown: {
       form: { home: formHome, away: formAway },
       h2h,
@@ -489,12 +500,14 @@ async function analyzeDayFixturesUncached(date) {
   // Charger fixtures API + sources web en parallèle (oddsapi = gratuit, pas de quota).
   // allSettled : une panne réseau ponctuelle sur un scraper (footballpred/forebet/oddsapi)
   // ne doit pas faire échouer toute l'analyse du jour — seule l'API foot est indispensable.
-  const [fixtures, fpredList, forebetList, oddsapiList] = await Promise.all([
+  const [fixtures, fpredList, forebetList, oddsapiList, apiOddsList] = await Promise.all([
     api.getFixturesByDate(date),
     footballpred.getTodayPredictions(date).catch(() => []),
     forebet.getTodayPredictions(date).catch(() => []),
     oddsapi.getTodayOdds().catch(() => []),
+    api.getOddsByDate(date).catch(() => []),
   ]);
+  const apiOddsMap = buildOddsMap(apiOddsList);
   const upcoming = fixtures.filter((f) => UPCOMING_STATUSES.includes(f.fixture.status.short));
   const finishedFixtures = fixtures.filter((f) => FINISHED_STATUSES.includes(f.fixture.status.short));
   const finished = finishedFixtures.map(buildFinishedEntry);
@@ -515,7 +528,7 @@ async function analyzeDayFixturesUncached(date) {
     return { ...webResult, results: [...webResult.results, ...finished] };
   }
 
-  upcoming.sort((a, b) => fixtureRank(b, oddsapiList, fpredList) - fixtureRank(a, oddsapiList, fpredList));
+  upcoming.sort((a, b) => fixtureRank(b, oddsapiList, fpredList, apiOddsMap) - fixtureRank(a, oddsapiList, fpredList, apiOddsMap));
 
   const toAnalyze = upcoming.slice(0, MAX_FIXTURES_PER_DAY);
 
@@ -523,7 +536,7 @@ async function analyzeDayFixturesUncached(date) {
   // pas saturer le navigateur Puppeteer partagé ni les sites scrapés) au lieu d'un par un
   const results = await mapWithConcurrency(toAnalyze, ANALYSIS_CONCURRENCY, async (fixture) => {
     try {
-      return await analyzeFixture(fixture, fpredList, forebetList, oddsapiList);
+      return await analyzeFixture(fixture, fpredList, forebetList, oddsapiList, apiOddsMap);
     } catch (err) {
       return {
         fixture: {
@@ -564,23 +577,25 @@ async function trackExtraFixturesForData(date) {
   if (backgroundTrackingRunning) return; // déjà en cours -> ne pas empiler un second passage
   backgroundTrackingRunning = true;
   try {
-    const [fixtures, fpredList, forebetList, oddsapiList] = await Promise.all([
+    const [fixtures, fpredList, forebetList, oddsapiList, apiOddsList] = await Promise.all([
       api.getFixturesByDate(date),
       footballpred.getTodayPredictions(date).catch(() => []),
       forebet.getTodayPredictions(date).catch(() => []),
       oddsapi.getTodayOdds().catch(() => []),
+      api.getOddsByDate(date).catch(() => []),
     ]);
+    const apiOddsMap = buildOddsMap(apiOddsList);
 
     if (api.getDailyRequestCount() >= api.DAILY_LIMIT) return; // quota épuisé -> rien à faire de plus
 
     const upcoming = fixtures.filter((f) => UPCOMING_STATUSES.includes(f.fixture.status.short));
-    upcoming.sort((a, b) => fixtureRank(b, oddsapiList, fpredList) - fixtureRank(a, oddsapiList, fpredList));
+    upcoming.sort((a, b) => fixtureRank(b, oddsapiList, fpredList, apiOddsMap) - fixtureRank(a, oddsapiList, fpredList, apiOddsMap));
     // Les MAX_FIXTURES_PER_DAY premiers sont déjà couverts par le flux normal -> ne pas les refaire
     const extra = upcoming.slice(MAX_FIXTURES_PER_DAY, BACKGROUND_TRACKING_LIMIT);
 
     await mapWithConcurrency(extra, BACKGROUND_CONCURRENCY, async (fixture) => {
       try {
-        await analyzeFixture(fixture, fpredList, forebetList, oddsapiList, { featured: false });
+        await analyzeFixture(fixture, fpredList, forebetList, oddsapiList, apiOddsMap, { featured: false });
       } catch {
         // Un match en échec ici ne doit pas interrompre les autres -> simplement pas de
         // pronostic enregistré pour celui-là cette fois-ci
@@ -611,15 +626,17 @@ async function searchFixtures(date, query) {
     return { results: [], total: upcoming.length };
   }
 
-  const [fpredList, forebetList, oddsapiList] = await Promise.all([
+  const [fpredList, forebetList, oddsapiList, apiOddsList] = await Promise.all([
     footballpred.getTodayPredictions(date),
     forebet.getTodayPredictions(date),
     oddsapi.getTodayOdds(),
+    api.getOddsByDate(date).catch(() => []),
   ]);
+  const apiOddsMap = buildOddsMap(apiOddsList);
 
   const results = await mapWithConcurrency(matched, ANALYSIS_CONCURRENCY, async (fixture) => {
     try {
-      return await analyzeFixture(fixture, fpredList, forebetList, oddsapiList);
+      return await analyzeFixture(fixture, fpredList, forebetList, oddsapiList, apiOddsMap);
     } catch (err) {
       return {
         fixture: {

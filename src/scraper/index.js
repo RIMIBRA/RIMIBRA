@@ -46,6 +46,10 @@ function blendProbabilities(algoProbabilities, webSources, anchorAlgo = true, we
   if (webSources.besoccer?.probabilities)      externals.push(['besoccer', webSources.besoccer.probabilities]);
   if (webSources.oddsapi?.probabilities)       externals.push(['oddsapi', webSources.oddsapi.probabilities]);
   if (webSources.flashscore?.probabilities)    externals.push(['flashscore', webSources.flashscore.probabilities]);
+  // Consensus de plusieurs bookmakers (voir algorithm/bookmakerOdds.js) — poids par défaut plus
+  // élevé que les autres sources externes (calibration.js) : un vrai consensus de marché sur
+  // jusqu'à une douzaine de bookmakers, pas l'avis d'un seul site.
+  if (webSources.apiOdds?.probabilities)       externals.push(['apiOdds', webSources.apiOdds.probabilities]);
 
   if (externals.length === 0) return algoProbabilities;
 
