@@ -10,7 +10,9 @@ const LOOKBACK_DAYS = 30;
 
 // Mêmes valeurs que le comportement historique de blendProbabilities (algo compté double,
 // chaque source externe pour 1) -> tant qu'il n'y a pas assez de données, rien ne change.
-const DEFAULT_WEIGHTS = { algo: 2, footballpred: 1, forebet: 1, besoccer: 1, oddsapi: 1, flashscore: 1 };
+// apiOdds pèse plus lourd par défaut : consensus de plusieurs bookmakers (voir
+// algorithm/bookmakerOdds.js), pas l'avis d'une seule source.
+const DEFAULT_WEIGHTS = { algo: 2, footballpred: 1, forebet: 1, besoccer: 1, oddsapi: 1, flashscore: 1, apiOdds: 2 };
 const MIN_WEIGHT = 0.3;
 const MAX_WEIGHT = 3;
 

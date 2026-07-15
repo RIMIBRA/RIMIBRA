@@ -20,6 +20,9 @@ const TTL = {
   // (~20-75 min avant le coup d'envoi, jamais avant) -> TTL court pour rester à jour dans
   // cette fenêtre, sans non plus retaper l'API à chaque appel.
   lineups: 10 * 60,
+  // Cotes bookmaker : endpoint paginé (~10 matchs/page), donc plusieurs requêtes à chaque
+  // rafraîchissement -> TTL plus long que fixturesToday pour ne pas repayer ce coût trop souvent.
+  odds: 30 * 60,
 };
 
 async function apiGet(endpoint, params = {}, ttlOverride = null) {
@@ -87,6 +90,21 @@ async function getFixtureById(fixtureId) {
   return results[0] || null;
 }
 
+// Cotes de plusieurs bookmakers par match (id 1 = "Match Winner"/1X2), liées au même id de
+// fixture que le reste de l'API — voir algorithm/bookmakerOdds.js pour le calcul du consensus.
+// Endpoint paginé côté fournisseur ; on boucle jusqu'à une page vide ou incomplète plutôt que de
+// dépendre d'un champ "paging" qu'apiGet ne renvoie pas (il ne garde que response.data.response).
+async function getOddsByDate(date) {
+  const all = [];
+  for (let page = 1; page <= 15; page++) {
+    const pageData = await apiGet('/odds', { date, page }, TTL.odds);
+    if (!pageData || pageData.length === 0) break;
+    all.push(...pageData);
+    if (pageData.length < 10) break;
+  }
+  return all;
+}
+
 module.exports = {
   getFixturesByDate,
   getTeamLastMatches,
@@ -96,6 +114,7 @@ module.exports = {
   getLineups,
   getActiveLeagues,
   getFixtureById,
+  getOddsByDate,
   getDailyRequestCount: cache.getDailyRequestCount,
   DAILY_LIMIT,
 };
