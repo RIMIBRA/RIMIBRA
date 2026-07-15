@@ -50,6 +50,9 @@ function blendProbabilities(algoProbabilities, webSources, anchorAlgo = true, we
   // élevé que les autres sources externes (calibration.js) : un vrai consensus de marché sur
   // jusqu'à une douzaine de bookmakers, pas l'avis d'un seul site.
   if (webSources.apiOdds?.probabilities)       externals.push(['apiOdds', webSources.apiOdds.probabilities]);
+  // Pronostic propre du fournisseur api-sports.io (voir algorithm/apiPrediction.js) — un modèle
+  // statistique de plus, indépendant du nôtre, poids par défaut standard (comme les scrapers).
+  if (webSources.apiPrediction?.probabilities) externals.push(['apiPrediction', webSources.apiPrediction.probabilities]);
 
   if (externals.length === 0) return algoProbabilities;
 

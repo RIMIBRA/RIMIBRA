@@ -90,6 +90,15 @@ async function getFixtureById(fixtureId) {
   return results[0] || null;
 }
 
+// Pronostic propre au fournisseur (winner/percent/advice + stats de forme détaillées) — voir
+// algorithm/apiPrediction.js pour l'extraction du triplet home/draw/away. Un seul match par
+// appel (contrairement à /odds, cet endpoint est scopé par fixture, pas par date) -> appelé
+// depuis analyzeFixture au même titre que les autres enrichissements par match (h2h, standings...).
+async function getPredictions(fixtureId) {
+  const results = await apiGet('/predictions', { fixture: fixtureId });
+  return results[0] || null;
+}
+
 // Cotes de plusieurs bookmakers par match (id 1 = "Match Winner"/1X2), liées au même id de
 // fixture que le reste de l'API — voir algorithm/bookmakerOdds.js pour le calcul du consensus.
 // Endpoint paginé côté fournisseur ; on boucle jusqu'à une page vide ou incomplète plutôt que de
@@ -115,6 +124,7 @@ module.exports = {
   getActiveLeagues,
   getFixtureById,
   getOddsByDate,
+  getPredictions,
   getDailyRequestCount: cache.getDailyRequestCount,
   DAILY_LIMIT,
 };
