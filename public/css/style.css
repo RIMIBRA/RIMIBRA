@@ -401,6 +401,9 @@ main {
   padding: 1rem 1.2rem;
   cursor: pointer;
   transition: border-color 0.2s, transform 0.15s;
+  /* Filet de sécurité : rien ne dépasse jamais du rectangle de la carte, même si un nom
+     d'équipe très long tentait de forcer une largeur supérieure à l'écran (voir .team min-width) */
+  overflow: hidden;
 }
 
 .card:hover {
@@ -438,6 +441,10 @@ main {
   align-items: center;
   gap: 0.3rem;
   flex: 1;
+  /* min-width: 0 indispensable : sans ça un élément flex refuse de rétrécir sous la largeur de
+     son contenu (défaut min-width:auto), et un nom d'équipe large pousse toute la rangée hors
+     de l'écran à droite — la cause du débordement des cartes sur mobile. */
+  min-width: 0;
   text-align: center;
 }
 
@@ -451,6 +458,10 @@ main {
   font-size: 0.85rem;
   font-weight: 600;
   line-height: 1.2;
+  /* Les noms longs reviennent à la ligne (y compris en coupant un mot trop long) au lieu de
+     forcer la largeur de la colonne -> la carte reste toujours dans l'écran. */
+  overflow-wrap: anywhere;
+  max-width: 100%;
 }
 
 .vs { color: var(--muted); font-size: 0.8rem; font-weight: bold; }
