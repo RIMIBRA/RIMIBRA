@@ -306,7 +306,13 @@ async function analyzeFixture(fixture, fpredList = null, forebetList = null, odd
   const season = fixture.league.season;
   const fixtureId = fixture.fixture.id;
   const date = fixture.fixture.date.split('T')[0];
-  const apiOddsMatch = apiOddsMap?.get(fixtureId) || null;
+  // Pas de map pré-calculée fournie (ex: analyse à la demande d'un seul match depuis la modale,
+  // voir routes/predictions.js /fixture/:id, ou cli.js) -> on la construit nous-mêmes ici. Sans
+  // ça ce match afficherait un blend différent (sans le consensus bookmaker) de celui déjà vu
+  // dans la liste du jour, qui elle fournit toujours la map — source de confusion pour un
+  // visiteur qui clique une carte et voit changer le pourcentage affiché.
+  const resolvedApiOddsMap = apiOddsMap || buildOddsMap(await api.getOddsByDate(date).catch(() => []));
+  const apiOddsMatch = resolvedApiOddsMap.get(fixtureId) || null;
   // Ligues U15-23/jeunes/réserves OU ligues obscures sans aucune couverture (pas de cotes,
   // pas de footballpred, pas une compétition majeure) : le fallback Puppeteer (~10s) y trouve
   // très rarement quelque chose d'exploitable — pas la peine de payer ce coût en temps
