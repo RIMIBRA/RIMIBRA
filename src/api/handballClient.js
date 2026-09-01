@@ -11,6 +11,5 @@ function seasonForDate(dateStr) {
 module.exports = createSportClient({
   baseUrl: 'https://v1.handball.api-sports.io',
   namespace: 'handball',
-  dailyLimit: 100,
   seasonFromDate: seasonForDate,
 });

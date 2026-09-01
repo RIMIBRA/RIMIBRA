@@ -1,10 +1,9 @@
 require('dotenv').config();
 const axios = require('axios');
 const cache = require('../cache/db');
+const { QUOTA_NAMESPACE, DAILY_LIMIT } = require('./apiSportsQuota');
 
 const BASE_URL = 'https://v1.basketball.api-sports.io';
-const DAILY_LIMIT = 100;
-const NAMESPACE = 'nba';
 // Toutes ligues de basket confondues (comme le foot) — pas seulement la NBA, qui est en intersaison
 // une bonne partie de l'année. Garder l'id pour un filtre futur si besoin.
 const NBA_LEAGUE_ID = 12;
@@ -20,9 +19,9 @@ async function apiGet(endpoint, params = {}, ttlOverride = null) {
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
-  const used = cache.getDailyRequestCount(NAMESPACE);
+  const used = cache.getDailyRequestCount(QUOTA_NAMESPACE);
   if (used >= DAILY_LIMIT) {
-    cache.warnOnceIfQuotaReached(NAMESPACE, used, DAILY_LIMIT);
+    cache.warnOnceIfQuotaReached(QUOTA_NAMESPACE, used, DAILY_LIMIT);
     return [];
   }
 
@@ -31,7 +30,7 @@ async function apiGet(endpoint, params = {}, ttlOverride = null) {
     params,
   });
 
-  cache.logRequest(endpoint, NAMESPACE);
+  cache.logRequest(endpoint, QUOTA_NAMESPACE);
   // api-sports.io répond en 200 même en cas de clé invalide ou de quota épuisé côté fournisseur
   // (response: [] silencieux) — sans ce log, ce genre de panne est indiscernable d'une vraie
   // absence de matchs ce jour-là.
@@ -125,7 +124,7 @@ module.exports = {
   getInjuries,
   getRawGames,
   getGameById,
-  getDailyRequestCount: () => cache.getDailyRequestCount(NAMESPACE),
+  getDailyRequestCount: () => cache.getDailyRequestCount(QUOTA_NAMESPACE),
   DAILY_LIMIT,
   NBA_LEAGUE_ID,
 };

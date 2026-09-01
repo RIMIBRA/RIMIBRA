@@ -1,10 +1,9 @@
 require('dotenv').config();
 const axios = require('axios');
 const cache = require('../cache/db');
+const { QUOTA_NAMESPACE, DAILY_LIMIT } = require('./apiSportsQuota');
 
 const BASE_URL = 'https://v3.football.api-sports.io';
-// Plan Pro actif : 7500 req/jour (mets à jour si tu changes de formule)
-const DAILY_LIMIT = 7500;
 
 const TTL = {
   // Court délibérément : cette liste contient le statut (NS/live/FT) de chaque match.
@@ -31,9 +30,9 @@ async function apiGet(endpoint, params = {}, ttlOverride = null) {
   const cached = cache.get(cacheKey);
   if (cached) return cached;
 
-  const used = cache.getDailyRequestCount();
+  const used = cache.getDailyRequestCount(QUOTA_NAMESPACE);
   if (used >= DAILY_LIMIT) {
-    cache.warnOnceIfQuotaReached('football', used, DAILY_LIMIT);
+    cache.warnOnceIfQuotaReached(QUOTA_NAMESPACE, used, DAILY_LIMIT);
     return []; // Retourner tableau vide plutôt que bloquer toute l'app
   }
 
@@ -42,7 +41,7 @@ async function apiGet(endpoint, params = {}, ttlOverride = null) {
     params,
   });
 
-  cache.logRequest(endpoint);
+  cache.logRequest(endpoint, QUOTA_NAMESPACE);
   // api-sports.io répond en 200 même en cas de clé invalide ou de quota épuisé côté fournisseur
   // (response: [] silencieux) — sans ce log, ce genre de panne est indiscernable d'une vraie
   // absence de matchs ce jour-là.
@@ -131,6 +130,6 @@ module.exports = {
   getFixtureById,
   getOddsByDate,
   getPredictions,
-  getDailyRequestCount: cache.getDailyRequestCount,
+  getDailyRequestCount: () => cache.getDailyRequestCount(QUOTA_NAMESPACE),
   DAILY_LIMIT,
 };
