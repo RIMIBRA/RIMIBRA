@@ -10,6 +10,5 @@ function seasonForDate(dateStr) {
 module.exports = createSportClient({
   baseUrl: 'https://v1.hockey.api-sports.io',
   namespace: 'hockey',
-  dailyLimit: 100,
   seasonFromDate: seasonForDate,
 });

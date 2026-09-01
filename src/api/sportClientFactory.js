@@ -1,22 +1,26 @@
 require('dotenv').config();
 const axios = require('axios');
 const cache = require('../cache/db');
+const { QUOTA_NAMESPACE, DAILY_LIMIT } = require('./apiSportsQuota');
 
 // Usine générique pour les sports d'équipe de la famille api-sports (NHL, MLB, Handball, etc.)
 // — même convention d'endpoints (/games, h2h, team+season) que NFL/Basketball déjà en place.
-// Une seule clé API_FOOTBALL_KEY couvre tous les sports du compte api-sports.io.
+// Une seule clé API_FOOTBALL_KEY couvre tous les sports du compte api-sports.io : le quota
+// quotidien (QUOTA_NAMESPACE/DAILY_LIMIT) est donc partagé entre tous ces clients, alors que
+// `namespace` ici ne sert plus qu'à préfixer les clés de cache pour éviter les collisions
+// entre sports (ex: hockey vs baseball).
 const GAMES_TODAY_TTL = 5 * 60; // court : contient le statut (NS/live/FT), doit rester frais
 const DEFAULT_TTL = 6 * 3600;
 
-function createSportClient({ baseUrl, namespace, dailyLimit = 100, seasonFromDate }) {
+function createSportClient({ baseUrl, namespace, dailyLimit = DAILY_LIMIT, seasonFromDate }) {
   async function apiGet(endpoint, params = {}, ttlOverride = null) {
     const cacheKey = `${namespace}_${endpoint}${JSON.stringify(params)}`;
     const cached = cache.get(cacheKey);
     if (cached) return cached;
 
-    const used = cache.getDailyRequestCount(namespace);
+    const used = cache.getDailyRequestCount(QUOTA_NAMESPACE);
     if (used >= dailyLimit) {
-      cache.warnOnceIfQuotaReached(namespace, used, dailyLimit);
+      cache.warnOnceIfQuotaReached(QUOTA_NAMESPACE, used, dailyLimit);
       return [];
     }
 
@@ -25,7 +29,7 @@ function createSportClient({ baseUrl, namespace, dailyLimit = 100, seasonFromDat
       params,
     });
 
-    cache.logRequest(endpoint, namespace);
+    cache.logRequest(endpoint, QUOTA_NAMESPACE);
     // api-sports.io répond en 200 même en cas de clé invalide ou de quota épuisé côté
     // fournisseur (response: [] silencieux) — sans ce log, ce genre de panne est indiscernable
     // d'une vraie absence de matchs ce jour-là.
@@ -101,7 +105,7 @@ function createSportClient({ baseUrl, namespace, dailyLimit = 100, seasonFromDat
     getH2H,
     getRawGames,
     getGameById,
-    getDailyRequestCount: () => cache.getDailyRequestCount(namespace),
+    getDailyRequestCount: () => cache.getDailyRequestCount(QUOTA_NAMESPACE),
     DAILY_LIMIT: dailyLimit,
   };
 }
