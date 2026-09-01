@@ -13,4 +13,28 @@ function needsSsl(connectionString) {
   }
 }
 
-module.exports = { needsSsl };
+// pg-connection-string traite désormais sslmode=require (présent par défaut dans les URI
+// fournies par Aiven, Supabase...) comme un alias de verify-full, et ÉCRASE silencieusement
+// le ssl:{rejectUnauthorized:false} qu'on passe explicitement à Pool — provoquant
+// "self-signed certificate in certificate chain" dès que le certificat du fournisseur n'est
+// pas signé par une CA du magasin de confiance par défaut de Node. On retire sslmode de l'URL
+// pour que seule notre config ssl explicite s'applique.
+function stripSslMode(connectionString) {
+  if (!connectionString) return connectionString;
+  try {
+    const url = new URL(connectionString);
+    url.searchParams.delete('sslmode');
+    return url.toString();
+  } catch {
+    return connectionString;
+  }
+}
+
+// Config prête à passer à `new Pool(...)` : connectionString nettoyée + ssl seulement si requis.
+function pgPoolConfig(connectionString) {
+  const config = { connectionString: stripSslMode(connectionString) };
+  if (needsSsl(connectionString)) config.ssl = { rejectUnauthorized: false };
+  return config;
+}
+
+module.exports = { needsSsl, stripSslMode, pgPoolConfig };

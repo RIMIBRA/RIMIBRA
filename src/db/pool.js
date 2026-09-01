@@ -1,10 +1,8 @@
 require('dotenv').config();
 const { Pool } = require('pg');
-const { needsSsl } = require('./ssl');
+const { pgPoolConfig } = require('./ssl');
 
-const poolConfig = { connectionString: process.env.DATABASE_URL };
-if (needsSsl(process.env.DATABASE_URL)) poolConfig.ssl = { rejectUnauthorized: false };
-const pool = new Pool(poolConfig);
+const pool = new Pool(pgPoolConfig(process.env.DATABASE_URL));
 
 // Sans ce listener, une erreur sur un client "idle" (connexion coupée par la DB, blip réseau,
 // redémarrage Postgres...) remonte comme exception non gérée et tue tout le process Node —
