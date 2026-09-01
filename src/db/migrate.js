@@ -2,11 +2,11 @@ require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
+const { needsSsl } = require('./ssl');
 
 async function migrate() {
-  const needsSsl = /\.render\.com/.test(process.env.DATABASE_URL || '');
   const poolConfig = { connectionString: process.env.DATABASE_URL };
-  if (needsSsl) poolConfig.ssl = { rejectUnauthorized: false };
+  if (needsSsl(process.env.DATABASE_URL)) poolConfig.ssl = { rejectUnauthorized: false };
   const pool = new Pool(poolConfig);
   const sql = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   try {
