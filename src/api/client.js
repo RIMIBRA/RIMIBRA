@@ -43,6 +43,12 @@ async function apiGet(endpoint, params = {}, ttlOverride = null) {
   });
 
   cache.logRequest(endpoint);
+  // api-sports.io répond en 200 même en cas de clé invalide ou de quota épuisé côté fournisseur
+  // (response: [] silencieux) — sans ce log, ce genre de panne est indiscernable d'une vraie
+  // absence de matchs ce jour-là.
+  if (response.data.errors && Object.keys(response.data.errors).length > 0) {
+    console.error(`Erreur API football (${endpoint}) :`, response.data.errors);
+  }
   const data = response.data.response;
   const ttlKey = Object.keys(TTL).find((k) => endpoint.includes(k)) || 'fixtures';
   cache.set(cacheKey, data, ttlOverride ?? TTL[ttlKey]);
