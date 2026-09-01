@@ -4,7 +4,7 @@ const { analyzeDayFixtures, analyzeFixture, searchFixtures } = require('../algor
 const api = require('../api/client');
 const oddsapi = require('../scraper/oddsapi');
 const { requireFeature, requireAdmin } = require('../auth/middleware');
-const { FREE_PREVIEW_LIMIT } = require('../auth/tiers');
+const { FREE_PREVIEW_LIMIT, isFreeTierUser } = require('../auth/tiers');
 const { applyBreakdownGate } = require('../auth/breakdownGate');
 const { sendServerError } = require('../utils/httpErrors');
 
@@ -55,7 +55,7 @@ router.get('/today', async (req, res) => {
     const limitReached = used >= api.DAILY_LIMIT;
 
     const plan = req.user?.plan || 'free';
-    const isFreeTier = plan === 'free' && !req.user?.isAdmin;
+    const isFreeTier = isFreeTierUser(plan, req.user?.isAdmin);
     // Plan gratuit : aperçu limité aux FREE_PREVIEW_LIMIT meilleurs matchs à venir/en cours
     // (déjà triés par confiance dans analyzeDayFixtures) — les matchs terminés restent tous
     // visibles (résultat déjà connu, pas un contenu à vendre). Les admins voient tout, sans
