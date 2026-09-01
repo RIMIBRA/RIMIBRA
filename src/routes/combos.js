@@ -4,6 +4,7 @@ const { canAccessSport, comboLimitFor, hasAccess } = require('../auth/tiers');
 const { getCombosForSport, saveCombo, markComboNotified } = require('../db/combos');
 const { mapWithConcurrency } = require('../utils/concurrency');
 const { notifyAllUsers } = require('../push/webPush');
+const { sendServerError } = require('../utils/httpErrors');
 
 const football = require('../algorithm/predictor');
 const nfl = require('../algorithm/nflPredictor');
@@ -802,7 +803,7 @@ router.get('/today', async (req, res) => {
       specialLocked,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 

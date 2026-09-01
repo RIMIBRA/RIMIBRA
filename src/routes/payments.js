@@ -5,6 +5,7 @@ const subscriptionPlans = require('../db/subscriptionPlans');
 const paymentTransactions = require('../db/paymentTransactions');
 const { setPlan } = require('../db/users');
 const geniuspay = require('../payments/geniuspay');
+const { sendServerError } = require('../utils/httpErrors');
 
 // URL publique du site — sert à construire les liens success_url/error_url que GeniusPay
 // utilise pour rediriger le navigateur du client après paiement (pas le webhook, qui est
@@ -41,7 +42,7 @@ router.post('/checkout', attachUser, async (req, res) => {
 
     res.json({ checkoutUrl: payment.checkout_url, reference: payment.reference });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 
@@ -90,7 +91,7 @@ router.post('/geniuspay/webhook', async (req, res) => {
 
     res.json({ received: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 

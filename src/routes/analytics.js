@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const analytics = require('../db/analytics');
+const { sendServerError } = require('../utils/httpErrors');
 
 // Public (pas d'auth) : appelé une fois par chargement de page depuis chaque page publique
 // (voir public/js/analytics.js). Aucune donnée personnelle en retour, juste un accusé 204.
@@ -13,7 +14,7 @@ router.post('/pageview', async (req, res) => {
     await analytics.recordPageView(path, req.ip, req.headers['user-agent']);
     res.status(204).end();
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 
@@ -28,7 +29,7 @@ router.post('/click', async (req, res) => {
     await analytics.recordClick(partner, path, req.ip, req.headers['user-agent']);
     res.status(204).end();
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 

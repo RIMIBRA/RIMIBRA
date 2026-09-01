@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { saveSubscription, removeSubscription } = require('../db/pushSubscriptions');
 const { configured } = require('../push/webPush');
+const { sendServerError } = require('../utils/httpErrors');
 
 router.get('/vapid-public-key', (req, res) => {
   if (!configured) return res.status(503).json({ error: 'Notifications push non configurées côté serveur' });
@@ -18,7 +19,7 @@ router.post('/subscribe', async (req, res) => {
     await saveSubscription(req.user.id, subscription);
     res.status(201).json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 

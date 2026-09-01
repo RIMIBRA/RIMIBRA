@@ -12,6 +12,7 @@ const { sendPasswordResetEmail } = require('../email/mailer');
 const subscriptionPlans = require('../db/subscriptionPlans');
 const { sign } = require('../auth/jwt');
 const { attachUser } = require('../auth/middleware');
+const { sendServerError } = require('../utils/httpErrors');
 
 const SITE_URL = process.env.SITE_URL || 'http://localhost:' + (process.env.PORT || 3001);
 
@@ -35,7 +36,7 @@ router.post('/register', async (req, res) => {
     const token = sign({ userId: user.id, email: user.email });
     res.status(201).json({ token, user: { id: user.id, email: user.email, plan: 'free', isAdmin: false } });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 
@@ -56,7 +57,7 @@ router.post('/login', async (req, res) => {
     const token = sign({ userId: user.id, email: user.email });
     res.json({ token, user: { id: user.id, email: user.email, plan, isAdmin } });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 
@@ -78,7 +79,7 @@ router.post('/forgot-password', async (req, res) => {
     }
     res.json({ message: 'Si un compte existe avec cet email, un lien de réinitialisation vient de lui être envoyé.' });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 
@@ -89,7 +90,7 @@ router.get('/reset-password/:token', async (req, res) => {
     const userId = await peekResetToken(req.params.token);
     res.json({ valid: !!userId });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 
@@ -113,7 +114,7 @@ router.post('/reset-password', async (req, res) => {
     const jwtToken = sign({ userId, email: user.email });
     res.json({ token: jwtToken, user: { id: userId, email: user.email, plan, isAdmin } });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 
@@ -128,7 +129,7 @@ router.get('/plans', async (req, res) => {
     const plans = await subscriptionPlans.listActivePlans();
     res.json({ plans });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 

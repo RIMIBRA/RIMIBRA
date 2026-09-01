@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const { listForUser, unreadCount, markRead, markAllRead } = require('../db/notifications');
+const { sendServerError } = require('../utils/httpErrors');
 
 router.get('/', async (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Connexion requise' });
@@ -11,7 +12,7 @@ router.get('/', async (req, res) => {
     ]);
     res.json({ notifications, unreadCount: unread });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 
@@ -21,7 +22,7 @@ router.post('/:id/read', async (req, res) => {
     await markRead(req.user.id, req.params.id);
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 
@@ -31,7 +32,7 @@ router.post('/read-all', async (req, res) => {
     await markAllRead(req.user.id);
     res.json({ ok: true });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 

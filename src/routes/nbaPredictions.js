@@ -4,6 +4,7 @@ const { analyzeDayGames, searchGames, analyzeGame } = require('../algorithm/nbaP
 const api = require('../api/nbaClient');
 const { requireAdmin } = require('../auth/middleware');
 const { applyBreakdownGate } = require('../auth/breakdownGate');
+const { sendServerError } = require('../utils/httpErrors');
 
 router.get('/today', async (req, res) => {
   try {
@@ -13,7 +14,7 @@ router.get('/today', async (req, res) => {
     const limitReached = used >= api.DAILY_LIMIT;
     res.json({ date, predictions: results, total, analyzed, requestsUsed: used, requestsLeft: Math.max(0, api.DAILY_LIMIT - used), limitReached });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 
@@ -27,7 +28,7 @@ router.get('/search', async (req, res) => {
     const used = api.getDailyRequestCount();
     res.json({ date, query: q, predictions: results, total, requestsUsed: used, requestsLeft: Math.max(0, api.DAILY_LIMIT - used) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 
@@ -43,7 +44,7 @@ router.get('/game/:id', async (req, res) => {
     const analysis = await analyzeGame(game);
     res.json(await applyBreakdownGate(analysis, req, 'nba'));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 

@@ -6,6 +6,7 @@ const { requireAdmin } = require('../auth/middleware');
 const { applyBreakdownGate } = require('../auth/breakdownGate');
 const cache = require('../cache/db');
 const { mapWithConcurrency } = require('../utils/concurrency');
+const { sendServerError } = require('../utils/httpErrors');
 
 // Contrairement au foot (cotes via the-odds-api, quota mensuel serré), le tennis tire ses
 // cotes d'api-tennis.com (quota quotidien énorme, très peu utilisé) -> calculer l'alternative
@@ -97,7 +98,7 @@ router.get('/today', async (req, res) => {
     const limitReached = used >= api.DAILY_LIMIT;
     res.json({ date, predictions, total, analyzed, requestsUsed: used, requestsLeft: Math.max(0, api.DAILY_LIMIT - used), limitReached });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 
@@ -116,7 +117,7 @@ router.get('/search', async (req, res) => {
     const used = api.getDailyRequestCount();
     res.json({ date, query: q, predictions, total, requestsUsed: used, requestsLeft: Math.max(0, api.DAILY_LIMIT - used) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 
@@ -135,7 +136,7 @@ router.get('/game/:id', async (req, res) => {
     const alternativeBet = await buildAlternativeBet(req.params.id, analysis);
     res.json(await applyBreakdownGate({ ...analysis, alternativeBet }, req, 'tennis'));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 
