@@ -7,6 +7,12 @@
 // abonnement — voir auth/breakdownGate.js. (Le déblocage par pub récompensée a été retiré :
 // sans compte Google Ad Manager branché, rien ne vérifiait côté serveur qu'une pub avait
 // vraiment été vue, ce qui permettait de débloquer le contenu premium/VIP gratuitement.)
+// Interrupteur temporaire (le temps d'obtenir le RCCM et d'avoir plusieurs utilisateurs) :
+// débloque tout gratuitement pour tout le monde, web et mobile, sans toucher au reste du
+// système d'abonnement — remettre à false (ou retirer la variable d'env) réactive les paliers
+// normalement, sans changement de code.
+const FREE_ACCESS_MODE = process.env.FREE_ACCESS_MODE === 'true';
+
 const TIER_RANK = { free: 0, premium: 1, vip: 2 };
 
 const SPORT_MIN_TIER = {
@@ -26,7 +32,16 @@ const FEATURE_MIN_TIER = {
 };
 
 function hasAccess(userPlan, requiredTier) {
+  if (FREE_ACCESS_MODE) return true;
   return TIER_RANK[userPlan] >= TIER_RANK[requiredTier];
+}
+
+// Utilisé pour l'aperçu limité du plan gratuit (voir routes/predictions.js) — distinct de
+// hasAccess : ici on demande explicitement "cet utilisateur est-il sur le plan le plus bas",
+// pas "a-t-il accès à un palier donné".
+function isFreeTierUser(userPlan, isAdmin) {
+  if (isAdmin || FREE_ACCESS_MODE) return false;
+  return (userPlan || 'free') === 'free';
 }
 
 function canAccessSport(userPlan, sport) {
@@ -43,7 +58,7 @@ function canUseFeature(userPlan, feature) {
 const COMBO_LIMIT_BY_PLAN = { free: 0, premium: 3, vip: Infinity };
 
 function comboLimitFor(userPlan, isAdmin) {
-  if (isAdmin) return Infinity;
+  if (isAdmin || FREE_ACCESS_MODE) return Infinity;
   return COMBO_LIMIT_BY_PLAN[userPlan] ?? 0;
 }
 
@@ -59,6 +74,7 @@ module.exports = {
   hasAccess,
   canAccessSport,
   canUseFeature,
+  isFreeTierUser,
   FREE_PREVIEW_LIMIT,
   comboLimitFor,
 };

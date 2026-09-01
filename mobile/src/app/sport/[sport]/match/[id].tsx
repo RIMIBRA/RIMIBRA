@@ -7,11 +7,11 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { MaxContentWidth, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { api, ApiError, type PredictionEntry } from '@/lib/api';
+import { api, ApiError, type PredictionEntry, type Sport } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 
-export default function MatchDetailScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+export default function SportMatchDetailScreen() {
+  const { sport, id } = useLocalSearchParams<{ sport: Sport; id: string }>();
   const { token } = useAuth();
   const theme = useTheme();
 
@@ -22,7 +22,7 @@ export default function MatchDetailScreen() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await api.footballFixture(token, id);
+        const res = await api.sportMatch(sport, token, id);
         if (!cancelled) setEntry(res);
       } catch (err) {
         if (!cancelled) setError(err instanceof ApiError ? err.message : 'Impossible de charger ce match.');
@@ -31,7 +31,7 @@ export default function MatchDetailScreen() {
     return () => {
       cancelled = true;
     };
-  }, [id, token]);
+  }, [sport, id, token]);
 
   if (error) {
     return (
