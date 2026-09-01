@@ -1,16 +1,8 @@
 require('dotenv').config();
 const { Pool } = require('pg');
+const { pgPoolConfig } = require('./ssl');
 
-// SSL seulement pour les URLs Postgres EXTERNES de Render (ex: depuis un PC local, hostname
-// en "xxx.render.com") — elles l'exigent, sinon ECONNRESET. Sur l'URL interne (utilisée par
-// l'app une fois déployée SUR Render, hostname court sans domaine), la clé "ssl" ne doit même
-// pas être présente dans la config : passer explicitement ssl:false s'est avéré faire
-// bloquer indéfiniment toute requête (comportement différent de ne pas préciser ssl du tout,
-// qui est ce que faisait le code avant ces changements et qui fonctionnait).
-const needsSsl = /\.render\.com/.test(process.env.DATABASE_URL || '');
-const poolConfig = { connectionString: process.env.DATABASE_URL };
-if (needsSsl) poolConfig.ssl = { rejectUnauthorized: false };
-const pool = new Pool(poolConfig);
+const pool = new Pool(pgPoolConfig(process.env.DATABASE_URL));
 
 // Sans ce listener, une erreur sur un client "idle" (connexion coupée par la DB, blip réseau,
 // redémarrage Postgres...) remonte comme exception non gérée et tue tout le process Node —

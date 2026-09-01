@@ -6,6 +6,7 @@ const oddsapi = require('../scraper/oddsapi');
 const { requireFeature, requireAdmin } = require('../auth/middleware');
 const { FREE_PREVIEW_LIMIT } = require('../auth/tiers');
 const { applyBreakdownGate } = require('../auth/breakdownGate');
+const { sendServerError } = require('../utils/httpErrors');
 
 // "Trop évident" se juge sur la VRAIE cote bookmaker, jamais sur la confiance de notre propre
 // algo : les deux peuvent diverger fortement (notre modèle peut être à 68% alors que le marché
@@ -74,7 +75,7 @@ router.get('/today', async (req, res) => {
       freePreview: isFreeTier,
     });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 
@@ -90,7 +91,7 @@ router.get('/search', requireFeature('search'), async (req, res) => {
     const used = api.getDailyRequestCount();
     res.json({ date, query: q, predictions: results, total, requestsUsed: used, requestsLeft: Math.max(0, api.DAILY_LIMIT - used) });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 
@@ -102,7 +103,7 @@ router.get('/fixture/:id', async (req, res) => {
     const alternativeBet = await buildAlternativeBet(fixture, analysis);
     res.json(await applyBreakdownGate({ ...analysis, alternativeBet }, req, 'football'));
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    sendServerError(res, err);
   }
 });
 

@@ -1,6 +1,7 @@
 const express = require('express');
 const { requireAdmin } = require('../auth/middleware');
 const { applyBreakdownGate } = require('../auth/breakdownGate');
+const { sendServerError } = require('../utils/httpErrors');
 
 function createSportRoutes({ api, predictor, sport }) {
   const router = express.Router();
@@ -13,7 +14,7 @@ function createSportRoutes({ api, predictor, sport }) {
       const limitReached = used >= api.DAILY_LIMIT;
       res.json({ date, predictions: results, total, analyzed, requestsUsed: used, requestsLeft: Math.max(0, api.DAILY_LIMIT - used), limitReached });
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -27,7 +28,7 @@ function createSportRoutes({ api, predictor, sport }) {
       const used = api.getDailyRequestCount();
       res.json({ date, query: q, predictions: results, total, requestsUsed: used, requestsLeft: Math.max(0, api.DAILY_LIMIT - used) });
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
@@ -44,7 +45,7 @@ function createSportRoutes({ api, predictor, sport }) {
       const analysis = await predictor.analyzeGame(game);
       res.json(await applyBreakdownGate(analysis, req, sport));
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      sendServerError(res, err);
     }
   });
 
